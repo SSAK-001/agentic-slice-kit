@@ -663,7 +663,46 @@ def mentor_answer(request: Request, qid: str, answer: str = Form(...)):
     if isinstance(user, RedirectResponse) or user["role"] != "mentor":
         return RedirectResponse("/login", status_code=303)
 
-    callback.answer(db(), qid, answer.strip(), who=user["email"])
+    store = db()
+    problem_row = store.db.execute(
+        "SELECT * FROM problems WHERE run_id=(SELECT run_id FROM questions WHERE id=?)",
+        (qid,),
+    ).fetchone()
+
+    # Keep the existing run's candidate pool current before the workflow resumes.
+    if problem_row:
+        run_id = problem_row["run_id"]
+        run_input = store.latest(run_id, "input") or {}
+        profile_row = store.db.execute(
+            "SELECT * FROM student_profiles WHERE user_id=?",
+            (user["id"],),
+        ).fetchone()
+        if profile_row:
+            candidates = run_input.get("candidate_profiles") or []
+            emails = {item.get("email") for item in candidates}
+            if user["email"] not in emails:
+                candidates.insert(
+                    0,
+                    {
+                        "student_name": user["name"],
+                        "email": user["email"],
+                        "skills": json.loads(profile_row["skills"]),
+                        "interests": json.loads(profile_row["interests"]),
+                        "availability": profile_row["availability"],
+                        "preferred_role": profile_row["preferred_role"],
+                        "bio": profile_row["bio"],
+                        "evidence_links": json.loads(profile_row["evidence_links"]),
+                    },
+                )
+                run_input["candidate_profiles"] = candidates
+                store.append(
+                    run_id,
+                    "input",
+                    run_input,
+                    produced_by=f"system:profile-refresh:{user['email']}",
+                )
+
+    callback.answer(store, qid, answer.strip(), who=user["email"])
     return RedirectResponse("/mentor", status_code=303)
 
 
