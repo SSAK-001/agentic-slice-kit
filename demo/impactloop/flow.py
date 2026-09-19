@@ -322,6 +322,7 @@ def build_flow(call=complete):
             step="proof",
         )
 
+
         ctx.append(
             "proof_of_ability",
             proof.model_dump(),
