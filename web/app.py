@@ -586,6 +586,18 @@ def mentor(request: Request):
 
     for p in project_rows:
         state = s.get_state(p["run_id"]).value if p["run_id"] else "not_started"
+
+        # Repair a run that received the mentor answer before the web app
+        # resumed the state machine. The answer is durable; resume is safe.
+        if p["run_id"] and state == "probing":
+            records = s.replay(p["run_id"])
+            has_answer = bool(s.history(p["run_id"], "expert_answer"))
+            has_decision = latest_payload(records, "mentor_decision") is not None
+            if has_answer and not has_decision:
+                runner.advance(s, p["run_id"], build_flow(), settings())
+                state = s.get_state(p["run_id"]).value
+                qs = callback.pending(s)
+
         badge_class = (
             "done" if state == "complete"
             else "waiting" if state == "awaiting_expert"
@@ -857,6 +869,17 @@ def run_page(request: Request, problem_id: int):
 
     records = s.replay(problem["run_id"])
     state = s.get_state(problem["run_id"]).value
+
+    # Repair a stale project if a mentor answer was saved but the state machine
+    # did not get a chance to resume.
+    if state == "probing":
+        has_answer = bool(s.history(problem["run_id"], "expert_answer"))
+        has_decision = latest_payload(records, "mentor_decision") is not None
+        if has_answer and not has_decision:
+            runner.advance(s, problem["run_id"], build_flow(), settings())
+            records = s.replay(problem["run_id"])
+            state = s.get_state(problem["run_id"]).value
+
     pending = callback.pending(s, problem["run_id"])
     mentor_question = next((q for q in pending if q.context.get("kind") == "mentor"), None)
     evidence_question = next((q for q in pending if q.context.get("kind") == "evidence"), None)
