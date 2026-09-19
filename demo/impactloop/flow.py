@@ -504,6 +504,34 @@ def build_flow(call=complete):
         mentor = ctx.latest("mentor_decision")
         evidence = ctx.latest("evidence_submission")
 
+        # Do not spend a verifier model call when no real evidence exists yet.
+        # The human must submit concrete proof first.
+        if evidence is None:
+            pending = callback.pending(ctx.store, ctx.run_id)
+            evidence_pending = any(
+                q.context.get("kind") == "evidence" for q in pending
+            )
+            if not evidence_pending:
+                callback.ask(
+                    ctx.store,
+                    ctx.run_id,
+                    (
+                        "Submit concrete evidence for the completed project work: "
+                        "links, screenshots, file names, prototype URLs, notes, "
+                        "or other artifacts showing what was actually completed."
+                    ),
+                    {
+                        "kind": "evidence",
+                        "resume_state": RunState.GATING.value,
+                        "reason": (
+                            "Verification cannot responsibly pass without "
+                            "evidence of the work."
+                        ),
+                    },
+                    ctx.settings,
+                )
+            return RunState.AWAITING_EXPERT
+
         result = call(
             settings=ctx.settings,
             budget=ctx.budget,
