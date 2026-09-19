@@ -704,20 +704,9 @@ def build_flow(call=complete):
                 ctx.settings,
             )
 
-        # If any assigned task is still waiting for evidence, keep the run
-        # suspended. The questions are independently answerable by their owners.
-        remaining_work = []
-        for task in assigned:
-            submissions = records_for(ctx.history("task_evidence_submission"), task)
-            verifications = records_for(ctx.history("task_verification"), task)
-            latest_verification = verifications[-1] if verifications else None
-            if not latest_verification or latest_verification.get("status") != "PASS":
-                remaining_work.append(task)
-
-        if remaining_work:
-            return RunState.AWAITING_EXPERT
-
-        # Verify each newly submitted task. If a task fails, its owner
+        # Do not stop before submitted evidence is verified. We may have
+        # several students with evidence already submitted in parallel.
+                # Verify each newly submitted task. If a task fails, its owner
         # will receive a revision request on the next pass.
         submitted_unverified = []
         for task in assigned:
@@ -782,6 +771,20 @@ def build_flow(call=complete):
             # Re-evaluate the task set. Any remaining tasks will either have
             # a pending evidence request or will be verified on a future pass.
             return RunState.DRAFTING
+
+        # After judging the submissions, see whether any assigned task
+        # still needs work from its owner. Those owners remain independently
+        # answerable through the pending task-evidence questions.
+        remaining_work = []
+        for task in assigned:
+            submissions = records_for(ctx.history("task_evidence_submission"), task)
+            verifications = records_for(ctx.history("task_verification"), task)
+            latest_verification = verifications[-1] if verifications else None
+            if not latest_verification or latest_verification.get("status") != "PASS":
+                remaining_work.append(task)
+
+        if remaining_work:
+            return RunState.AWAITING_EXPERT
 
         # All task verifications have passed. Continue to Proof-of-Ability.
         # Every assigned task has passed. Produce one proof and opportunity for
