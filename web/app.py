@@ -573,29 +573,73 @@ def mentor(request: Request):
     qs = callback.pending(s)
     cards = []
 
-    for q in qs:
-        options = q.context.get("options") or []
-        if options:
-            option_html = "".join(
-                f'<button class="option" name="answer" value="{esc(option)}"><b>{esc(option)}</b><span class="small muted">Choose this direction for the project.</span></button>'
-                for option in options
-            )
-            form = f'<form method="post" action="/mentor/{esc(q.id)}"><div class="option-grid">{option_html}</div></form>'
-        else:
-            form = f"""
-            <form method="post" action="/mentor/{esc(q.id)}">
-              <textarea name="answer" required placeholder="Enter your decision..."></textarea>
-              <button class="button" type="submit">Submit decision</button>
-            </form>
+    # Show every campus project so the mentor always has a real queue.
+    project_rows = s.db.execute(
+        """
+        SELECT p.*, u.name AS creator_name, u.email AS creator_email
+        FROM problems p
+        JOIN users u ON u.id = p.created_by
+        ORDER BY p.created_at DESC
+        LIMIT 30
+        """
+    ).fetchall()
+
+    for p in project_rows:
+        state = s.get_state(p["run_id"]).value if p["run_id"] else "not_started"
+        badge_class = (
+            "done" if state == "complete"
+            else "waiting" if state == "awaiting_expert"
+            else "fail" if state == "failed"
+            else "active"
+        )
+
+        pending_for_project = [q for q in qs if q.run_id == p["run_id"]]
+        decision_html = ""
+        for q in pending_for_project:
+            options = q.context.get("options") or []
+            if options:
+                option_html = "".join(
+                    f'<button class="option" name="answer" value="{esc(option)}"><b>{esc(option)}</b><span class="small muted">Choose this direction for the project.</span></button>'
+                    for option in options
+                )
+                form = f'<form method="post" action="/mentor/{esc(q.id)}"><div class="option-grid">{option_html}</div></form>'
+            else:
+                form = f"""
+                <form method="post" action="/mentor/{esc(q.id)}">
+                  <textarea name="answer" required placeholder="Enter your decision..."></textarea>
+                  <button class="button" type="submit">Submit decision</button>
+                </form>
+                """
+            decision_html += f"""
+            <div class="callout" style="margin-top:14px;">
+              <div>
+                <h3>Decision needed</h3>
+                <p><b>{esc(q.question)}</b></p>
+                <p class="small muted">{esc(q.context.get("reason", ""))}</p>
+              </div>
+              <div style="min-width:45%;">{form}</div>
+            </div>
             """
 
         cards.append(
             f"""
             <section class="card">
-              <span class="eyebrow">Decision needed</span>
-              <h2>{esc(q.question)}</h2>
-              <p class="muted">{esc(q.context.get("reason", ""))}</p>
-              {form}
+              <div style="display:flex;justify-content:space-between;gap:16px;align-items:flex-start;">
+                <div>
+                  <span class="eyebrow">Campus project</span>
+                  <h2>{esc(p["title"])}</h2>
+                  <p class="muted">{esc(p["description"])}</p>
+                  <p class="small muted">Created by <b>{esc(p["creator_name"])}</b> · {esc(p["creator_email"])}</p>
+                </div>
+                <span class="badge {badge_class}">{esc(state.replace("_", " "))}</span>
+              </div>
+              <div class="kpi-row">
+                <div class="kpi"><b>{len(pending_for_project)}</b><span>Pending mentor actions</span></div>
+                <div class="kpi"><b>{1 if state == "complete" else 0}</b><span>Completed</span></div>
+                <div class="kpi"><b>{esc(p["id"])}</b><span>Project ID</span></div>
+              </div>
+              <a class="button secondary" href="/run/{p["id"]}">Open project</a>
+              {decision_html or '<div class="empty" style="margin-top:14px;">No decision is currently waiting. Open the project to review the AI work.</div>'}
             </section>
             """
         )
@@ -604,10 +648,10 @@ def mentor(request: Request):
         f"""
         <section>
           <span class="eyebrow">Mentor workspace</span>
-          <h1>Human decisions, at the right moment.</h1>
-          <p class="muted">ImpactLoop pauses when a decision needs context that an agent should not invent.</p>
+          <h1>Campus projects that need human context.</h1>
+          <p class="muted">Review the live project queue, see where the agent workflow is paused, and make the human decision when required.</p>
         </section>
-        {''.join(cards) or '<section class="card"><div class="empty">No decisions are waiting.</div></section>'}
+        {''.join(cards) or '<section class="card"><div class="empty">No campus projects yet.</div></section>'}
         """,
         user,
     )
