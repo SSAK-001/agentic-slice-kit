@@ -317,7 +317,10 @@ def build_flow(call=complete):
         # team and task plan using the latest candidate profiles.
         run_input = ctx.latest("input") or {}
         candidates = run_input.get("candidate_profiles") or []
-        current_creator = run_input.get("created_by")
+        current_creator = (
+            run_input.get("created_by")
+            or ctx.store.meta(ctx.run_id).get("created_by")
+        )
         team = ctx.latest("team_proposal") or {}
         member_names = {
             member.get("student_name")
