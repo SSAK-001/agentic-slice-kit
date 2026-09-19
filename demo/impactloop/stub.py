@@ -11,77 +11,84 @@ from pydantic import BaseModel
 
 STUDENT_GOAL = """{
   "student_name": "Aarav",
-  "goal": "I know basic Python and data analysis, but I do not have a real project that proves I can do it.",
+  "goal": "I want to help improve how students discover campus events and opportunities.",
   "current_skills": [
-    "Python",
-    "Excel",
-    "Basic data analysis"
+    "Student research",
+    "Communication",
+    "Basic data organisation"
   ],
   "time_available": "6 hours per week",
-  "desired_capability": "Data Analysis"
+  "desired_capability": "User Research and Opportunity Discovery"
 }"""
 
 
 PROJECT_BRIEF = """{
-  "project_title": "Analyse Student Cafeteria Spending Patterns",
-  "problem_to_solve": "Understand how students spend money at the cafeteria and identify useful spending patterns.",
-  "objective": "Use a small anonymised dataset to identify meaningful spending patterns and communicate the findings clearly.",
+  "project_title": "Build a Unified Campus Opportunity Discovery Flow",
+  "problem_to_solve": "Students miss useful campus events and opportunities because information is scattered across WhatsApp groups, posters, club pages, and separate channels.",
+  "objective": "Understand how students currently discover events and design a simple unified flow that makes relevant opportunities easier to find.",
   "tasks": [
-    "Inspect and clean the dataset",
-    "Calculate basic spending statistics",
-    "Identify important patterns",
-    "Create two clear visualisations",
+    "Interview students about how they currently find campus events",
+    "Map the different channels where event information is shared",
+    "Organise sample event information into a common format",
+    "Design a simple unified opportunity-discovery flow",
+    "Test the flow with students and record their feedback",
     "Write a short findings report"
   ],
   "deliverables": [
-    "Cleaned dataset",
-    "Analysis notebook",
-    "Two visualisations",
+    "Student interview notes",
+    "Campus event-channel map",
+    "Structured event dataset",
+    "Opportunity-discovery flow prototype",
+    "Student walkthrough findings",
     "Short findings report"
   ],
   "required_capabilities": [
-    "Python",
-    "Data analysis",
-    "Data visualisation",
+    "User research",
+    "Data organisation",
+    "UX and flow design",
     "Communication"
   ],
   "evidence_requirements": [
-    "Analysis notebook",
-    "Charts",
-    "Findings report"
+    "Interview notes",
+    "Channel map",
+    "Event dataset",
+    "Prototype screenshot",
+    "Walkthrough findings"
   ]
 }"""
 
 
 # Deliberately weak evidence.
-# The verifier should reject this.
+# The verifier should reject this first submission.
 WEAK_VERIFICATION = """{
   "status": "REVISION_REQUIRED",
-  "reason": "The student provided only a written claim and did not provide enough evidence to demonstrate that the analysis was actually performed.",
+  "reason": "The student submitted only a general claim and did not provide enough evidence of actual research, design, or testing.",
   "missing_evidence": [
-    "Analysis notebook",
-    "Data visualisations",
-    "Findings report"
+    "Student interview notes",
+    "Event-channel map",
+    "Opportunity-discovery prototype",
+    "Student walkthrough findings"
   ]
 }"""
 
 
 # Stronger evidence.
-# The verifier should accept this.
+# The verifier should accept this second submission.
 STRONG_VERIFICATION = """{
   "status": "PASS",
-  "reason": "The submitted notebook, visualisations, and findings report provide evidence of the student's data-analysis contribution.",
+  "reason": "The submitted interview notes, channel map, prototype, and walkthrough findings provide evidence of the student's contribution to improving campus opportunity discovery.",
   "missing_evidence": []
 }"""
 
 
 PROOF = """{
-  "capability": "Data Analysis",
-  "contribution": "Analysed anonymised student cafeteria spending data, identified spending patterns, and communicated the findings through visualisations and a short report.",
+  "capability": "User Research and Opportunity Discovery",
+  "contribution": "Interviewed students, mapped fragmented campus-event channels, helped design a unified opportunity-discovery flow, and documented student walkthrough feedback.",
   "evidence": [
-    "analysis_notebook.ipynb",
-    "spending_patterns.png",
-    "findings_report.md"
+    "student_interview_notes.md",
+    "event_channel_map.png",
+    "opportunity_flow.png",
+    "walkthrough_findings.md"
   ],
   "verification_status": "verified"
 }"""
@@ -138,3 +145,102 @@ class Stub:
 
         # Validate the fake response using the real Pydantic schema.
         return schema.model_validate_json(raw) if schema else raw
+
+
+TEAM_PROPOSAL = """{
+  "members": [
+    {
+      "student_name": "Aarav",
+      "role": "Student researcher",
+      "reason": "Can interview students and understand how they currently discover events.",
+      "matched_capabilities": [
+        "Student research",
+        "Communication"
+      ]
+    },
+    {
+      "student_name": "Meera",
+      "role": "UX flow designer",
+      "reason": "Can convert research findings into a simple opportunity-discovery experience.",
+      "matched_capabilities": [
+        "UX and flow design",
+        "Visual communication"
+      ]
+    },
+    {
+      "student_name": "Karthik",
+      "role": "Event data organiser",
+      "reason": "Can structure event information into a consistent and searchable format.",
+      "matched_capabilities": [
+        "Data organisation",
+        "Attention to detail"
+      ]
+    }
+  ],
+  "unresolved_gaps": []
+}"""
+
+
+TASK_PLAN = """{
+  "tasks": [
+    "Interview students about how they find campus events",
+    "Map the channels where event information is shared",
+    "Organise sample event information into a common format",
+    "Design a unified opportunity-discovery flow",
+    "Test the flow with students",
+    "Write the findings report"
+  ],
+  "owners": {
+    "Interview students about how they find campus events": "Aarav",
+    "Map the channels where event information is shared": "Aarav",
+    "Organise sample event information into a common format": "Karthik",
+    "Design a unified opportunity-discovery flow": "Meera",
+    "Test the flow with students": "Aarav",
+    "Write the findings report": "Aarav"
+  },
+  "acceptance_conditions": {
+    "Interview students about how they find campus events": "At least three interview notes are recorded.",
+    "Map the channels where event information is shared": "The main event-sharing channels are listed.",
+    "Organise sample event information into a common format": "At least ten sample events use the same fields.",
+    "Design a unified opportunity-discovery flow": "A clear flow or prototype is created.",
+    "Test the flow with students": "Three student walkthroughs are recorded.",
+    "Write the findings report": "The report summarises findings and suggested improvements."
+  },
+  "evidence_requirements": [
+    "Student interview notes",
+    "Event-channel map",
+    "Structured event dataset",
+    "Opportunity-discovery prototype",
+    "Student walkthrough findings",
+    "Short findings report"
+  ]
+}"""
+
+
+MENTOR_DECISION = """{
+  "question": "Which priority should guide the project if a unified discovery flow conflicts with existing club-channel preferences?",
+  "decision": "Prioritise one unified student experience while keeping existing channels as input sources.",
+  "priority": "One clear student discovery experience",
+  "answered_by": "Student affairs mentor"
+}"""
+
+
+OPPORTUNITY_RECOMMENDATION = """{
+  "opportunity_title": "Campus Innovation and Student Experience Project",
+  "explanation": "The verified research, event-channel mapping, data organisation, and student testing experience match this opportunity.",
+  "matched_evidence": [
+    "student_interview_notes.md",
+    "event_channel_map.png",
+    "walkthrough_findings.md"
+  ]
+}"""
+
+
+_SCRIPT.update(
+    {
+        "team": [TEAM_PROPOSAL],
+        "plan": [TASK_PLAN],
+        "mentor": [MENTOR_DECISION],
+        "connector": [OPPORTUNITY_RECOMMENDATION],
+    }
+)

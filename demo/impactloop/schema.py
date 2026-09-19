@@ -34,3 +34,35 @@ class ProofOfAbility(BaseModel):
     contribution: str
     evidence: list[str]
     verification_status: Literal["verified"]
+
+
+class StudentMatch(BaseModel):
+    student_name: str
+    role: str
+    reason: str
+    matched_capabilities: list[str]
+
+
+class TeamProposal(BaseModel):
+    members: list[StudentMatch]
+    unresolved_gaps: list[str] = Field(default_factory=list)
+
+
+class TaskPlan(BaseModel):
+    tasks: list[str]
+    owners: dict[str, str]
+    acceptance_conditions: dict[str, str]
+    evidence_requirements: list[str]
+
+
+class MentorDecision(BaseModel):
+    question: str
+    decision: str
+    priority: str
+    answered_by: str
+
+
+class OpportunityRecommendation(BaseModel):
+    opportunity_title: str
+    explanation: str
+    matched_evidence: list[str]
