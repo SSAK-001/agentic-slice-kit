@@ -25,35 +25,19 @@ STUDENT_GOAL = """{
 PROJECT_BRIEF = """{
   "project_title": "Build a Unified Campus Opportunity Discovery Flow",
   "problem_to_solve": "Students miss useful campus events and opportunities because information is scattered across WhatsApp groups, posters, club pages, and separate channels.",
-  "objective": "Understand how students currently discover events and design a simple unified flow that makes relevant opportunities easier to find.",
+  "objective": "Design and validate a simple unified flow that makes relevant opportunities easier to find.",
   "tasks": [
-    "Interview students about how they currently find campus events",
-    "Map the different channels where event information is shared",
-    "Organise sample event information into a common format",
-    "Design a simple unified opportunity-discovery flow",
-    "Test the flow with students and record their feedback",
-    "Write a short findings report"
+    "Interview students about how they currently find campus events"
   ],
   "deliverables": [
-    "Student interview notes",
-    "Campus event-channel map",
-    "Structured event dataset",
-    "Opportunity-discovery flow prototype",
-    "Student walkthrough findings",
-    "Short findings report"
+    "Student interview notes"
   ],
   "required_capabilities": [
     "User research",
-    "Data organisation",
-    "UX and flow design",
     "Communication"
   ],
   "evidence_requirements": [
-    "Interview notes",
-    "Channel map",
-    "Event dataset",
-    "Prototype screenshot",
-    "Walkthrough findings"
+    "Student interview notes"
   ]
 }"""
 
@@ -82,6 +66,7 @@ STRONG_VERIFICATION = """{
 
 
 PROOF = """{
+  "student_name": "Test Student",
   "capability": "User Research and Opportunity Discovery",
   "contribution": "Interviewed students, mapped fragmented campus-event channels, helped design a unified opportunity-discovery flow, and documented student walkthrough feedback.",
   "evidence": [
@@ -89,6 +74,9 @@ PROOF = """{
     "event_channel_map.png",
     "opportunity_flow.png",
     "walkthrough_findings.md"
+  ],
+  "verified_tasks": [
+    "Interview students about how they currently find campus events"
   ],
   "verification_status": "verified"
 }"""
@@ -150,31 +138,17 @@ class Stub:
 TEAM_PROPOSAL = """{
   "members": [
     {
-      "student_name": "Aarav",
+      "student_name": "Test Student",
       "role": "Student researcher",
-      "reason": "Can interview students and understand how they currently discover events.",
+      "reason": "The profile shows research and communication capability relevant to interviewing students.",
       "matched_capabilities": [
-        "Student research",
+        "Research",
         "Communication"
-      ]
-    },
-    {
-      "student_name": "Meera",
-      "role": "UX flow designer",
-      "reason": "Can convert research findings into a simple opportunity-discovery experience.",
-      "matched_capabilities": [
-        "UX and flow design",
-        "Visual communication"
-      ]
-    },
-    {
-      "student_name": "Karthik",
-      "role": "Event data organiser",
-      "reason": "Can structure event information into a consistent and searchable format.",
-      "matched_capabilities": [
-        "Data organisation",
-        "Attention to detail"
-      ]
+      ],
+      "assigned_tasks": [
+        "Interview students about how they currently find campus events"
+      ],
+      "match_strength": 92
     }
   ],
   "unresolved_gaps": []
@@ -183,36 +157,16 @@ TEAM_PROPOSAL = """{
 
 TASK_PLAN = """{
   "tasks": [
-    "Interview students about how they find campus events",
-    "Map the channels where event information is shared",
-    "Organise sample event information into a common format",
-    "Design a unified opportunity-discovery flow",
-    "Test the flow with students",
-    "Write the findings report"
+    "Interview students about how they currently find campus events"
   ],
   "owners": {
-    "Interview students about how they find campus events": "Aarav",
-    "Map the channels where event information is shared": "Aarav",
-    "Organise sample event information into a common format": "Karthik",
-    "Design a unified opportunity-discovery flow": "Meera",
-    "Test the flow with students": "Aarav",
-    "Write the findings report": "Aarav"
+    "Interview students about how they currently find campus events": "Test Student"
   },
   "acceptance_conditions": {
-    "Interview students about how they find campus events": "At least three interview notes are recorded.",
-    "Map the channels where event information is shared": "The main event-sharing channels are listed.",
-    "Organise sample event information into a common format": "At least ten sample events use the same fields.",
-    "Design a unified opportunity-discovery flow": "A clear flow or prototype is created.",
-    "Test the flow with students": "Three student walkthroughs are recorded.",
-    "Write the findings report": "The report summarises findings and suggested improvements."
+    "Interview students about how they currently find campus events": "At least three interview notes are recorded."
   },
   "evidence_requirements": [
-    "Student interview notes",
-    "Event-channel map",
-    "Structured event dataset",
-    "Opportunity-discovery prototype",
-    "Student walkthrough findings",
-    "Short findings report"
+    "Student interview notes"
   ]
 }"""
 
@@ -226,6 +180,7 @@ MENTOR_DECISION = """{
 
 
 OPPORTUNITY_RECOMMENDATION = """{
+  "student_name": "Test Student",
   "opportunity_title": "Campus Innovation and Student Experience Project",
   "explanation": "The verified research, event-channel mapping, data organisation, and student testing experience match this opportunity.",
   "matched_evidence": [
