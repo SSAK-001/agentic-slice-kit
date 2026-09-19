@@ -58,6 +58,29 @@ def test_impactloop_completes_with_real_human_checkpoints(tmp_path):
     callback.answer(
         store,
         evidence_question.id,
+        "general notes from the project",
+        who="student@test",
+    )
+    store.append(
+        run_id,
+        "evidence_submission",
+        {
+            "submitted_by": "student@test",
+            "evidence": "general notes from the project",
+        },
+        produced_by="student@test",
+    )
+
+    state = runner.advance(store, run_id, build_flow(call=stub), settings())
+    assert state is RunState.AWAITING_EXPERT
+
+    revision_question = next(
+        q for q in callback.pending(store, run_id)
+        if q.context.get("kind") == "evidence"
+    )
+    callback.answer(
+        store,
+        revision_question.id,
         "interview_notes.md; prototype.png; walkthrough_findings.md",
         who="student@test",
     )
