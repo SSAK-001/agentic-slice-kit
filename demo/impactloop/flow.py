@@ -312,6 +312,103 @@ def build_flow(call=complete):
 
         answer = answers[-1].payload
 
+        # A project created before profile-refresh support may have been matched
+        # without the creator. When the mentor resumes that run, refresh the
+        # team and task plan using the latest candidate profiles.
+        run_input = ctx.latest("input") or {}
+        candidates = run_input.get("candidate_profiles") or []
+        current_creator = run_input.get("created_by")
+        team = ctx.latest("team_proposal") or {}
+        member_names = {
+            member.get("student_name")
+            for member in (team.get("members") or [])
+            if isinstance(member, dict)
+        }
+        creator_name = next(
+            (
+                profile.get("student_name")
+                for profile in candidates
+                if profile.get("email") == current_creator
+            ),
+            None,
+        )
+
+        if creator_name and creator_name not in member_names:
+            project = ctx.latest("project_brief")
+            refreshed_team = call(
+                settings=ctx.settings,
+                budget=ctx.budget,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "Act as a semantic capability matcher. Compare the "
+                            "project requirements and concrete tasks against every "
+                            "supplied student profile. Include suitable students "
+                            "who can genuinely contribute, including the project "
+                            "creator when their profile fits. Assign concrete tasks "
+                            "only when supported by the profile. Never invent skills "
+                            "or experience. Return the strongest valid team coverage, "
+                            "with reasons, matched capabilities, assigned tasks, and "
+                            "0-100 match strength."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": json.dumps(
+                            {
+                                "project": project,
+                                "candidate_profiles": candidates,
+                            },
+                            indent=2,
+                        ),
+                    },
+                ],
+                schema=TeamProposal,
+                step="team_refresh",
+            )
+
+            ctx.append(
+                "team_proposal",
+                refreshed_team.model_dump(),
+                produced_by="agent:team_matcher_refresh",
+            )
+
+            refreshed_plan = call(
+                settings=ctx.settings,
+                budget=ctx.budget,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "Create a project plan with task owners, acceptance "
+                            "conditions, and evidence requirements. Use only the "
+                            "proposed team and project tasks. Give each task the "
+                            "best suitable owner when the team provides a valid "
+                            "match; otherwise leave it unassigned."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": json.dumps(
+                            {
+                                "project": project,
+                                "team": refreshed_team.model_dump(),
+                            },
+                            indent=2,
+                        ),
+                    },
+                ],
+                schema=TaskPlan,
+                step="plan_refresh",
+            )
+
+            ctx.append(
+                "task_plan",
+                refreshed_plan.model_dump(),
+                produced_by="agent:orchestrator_refresh",
+            )
+
         ctx.append(
             "mentor_decision",
             {
