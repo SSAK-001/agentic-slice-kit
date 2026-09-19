@@ -1,4 +1,5 @@
 from __future__ import annotations
+import json
 
 import hashlib
 import hmac
@@ -210,3 +211,120 @@ if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
 
+
+
+@app.get("/profile", response_class=HTMLResponse)
+def profile_page(request: Request):
+    user = require_user(request)
+    if isinstance(user, RedirectResponse):
+        return user
+
+    store = db()
+    row = store.db.execute(
+        "SELECT * FROM student_profiles WHERE user_id=?",
+        (user["id"],),
+    ).fetchone()
+
+    profile = dict(row) if row else {
+        "skills": "[]",
+        "interests": "[]",
+        "availability": "",
+        "preferred_role": "",
+        "bio": "",
+        "evidence_links": "[]",
+    }
+
+    skills = ", ".join(json.loads(profile["skills"]))
+    interests = ", ".join(json.loads(profile["interests"]))
+    links = "\n".join(json.loads(profile["evidence_links"]))
+
+    return layout(f"""
+    <section class="card">
+      <p class="badge">STUDENT PROFILE</p>
+      <h1>Make your abilities discoverable.</h1>
+      <p class="muted">
+        ImpactLoop uses this information to match you to meaningful campus work.
+      </p>
+
+      <form method="post" action="/profile">
+        <label>Skills</label>
+        <input name="skills" value="{esc(skills)}"
+               placeholder="Python, Figma, research, communication" required>
+
+        <label>Interests</label>
+        <input name="interests" value="{esc(interests)}"
+               placeholder="student experience, sustainability, design">
+
+        <label>Weekly availability</label>
+        <input name="availability" value="{esc(profile["availability"])}"
+               placeholder="6 hours per week" required>
+
+        <label>Preferred role</label>
+        <input name="preferred_role" value="{esc(profile["preferred_role"])}"
+               placeholder="UX designer, researcher, data organiser">
+
+        <label>Short bio</label>
+        <textarea name="bio" required>{esc(profile["bio"])}</textarea>
+
+        <label>Evidence or project links</label>
+        <textarea name="evidence_links"
+                  placeholder="One link or project name per line">{esc(links)}</textarea>
+
+        <button>Save profile</button>
+      </form>
+    </section>
+    """, user)
+
+
+@app.post("/profile")
+def save_profile(
+    request: Request,
+    skills: str = Form(...),
+    interests: str = Form(""),
+    availability: str = Form(...),
+    preferred_role: str = Form(""),
+    bio: str = Form(""),
+    evidence_links: str = Form(""),
+):
+    user = require_user(request)
+    if isinstance(user, RedirectResponse):
+        return user
+
+    store = db()
+
+    def split_lines(value: str) -> list[str]:
+        return [
+            item.strip()
+            for item in value.replace(",", "\n").splitlines()
+            if item.strip()
+        ]
+
+    values = (
+        user["id"],
+        json.dumps(split_lines(skills)),
+        json.dumps(split_lines(interests)),
+        availability.strip(),
+        preferred_role.strip(),
+        bio.strip(),
+        json.dumps(split_lines(evidence_links)),
+        time.time(),
+    )
+
+    store.db.execute(
+        """
+        INSERT INTO student_profiles
+        (user_id, skills, interests, availability, preferred_role, bio,
+         evidence_links, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(user_id) DO UPDATE SET
+          skills=excluded.skills,
+          interests=excluded.interests,
+          availability=excluded.availability,
+          preferred_role=excluded.preferred_role,
+          bio=excluded.bio,
+          evidence_links=excluded.evidence_links
+        """,
+        values,
+    )
+
+    return RedirectResponse("/", status_code=303)
