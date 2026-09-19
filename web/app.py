@@ -606,7 +606,10 @@ def mentor(request: Request):
             else "active"
         )
 
-        pending_for_project = [\n            q for q in qs\n            if q.run_id == p["run_id"] and q.context.get("kind") == "mentor"\n        ]
+        pending_for_project = [
+            q for q in qs
+            if q.run_id == p["run_id"] and q.context.get("kind") == "mentor"
+        ]
         decision_html = ""
         for q in pending_for_project:
             options = q.context.get("options") or []
