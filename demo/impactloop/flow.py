@@ -195,10 +195,18 @@ def build_flow(call=complete):
                 {
                     "role": "system",
                     "content": (
-                        "Match students to complementary roles using only the "
-                        "candidate profiles provided. Never invent a skill, "
-                        "experience, availability, or student. Explain the "
-                        "capability evidence behind every match."
+                        "Act as a semantic capability matcher. For each proposed "
+                        "team member, compare the project's required capabilities "
+                        "and concrete tasks against the supplied student profile: "
+                        "skills, interests, experience, preferred role, availability, "
+                        "and evidence links. Match by meaning and related capability, "
+                        "not only exact keyword overlap. Assign only tasks that fit "
+                        "the student's demonstrated profile. Never invent a student, "
+                        "skill, experience, availability, or evidence. Do not match "
+                        "a student merely because they are available. Explain why "
+                        "the student's profile supports the role, list the exact "
+                        "matched capabilities, list the tasks assigned to them, and "
+                        "give a 0-100 match_strength based only on the provided data."
                     ),
                 },
                 {
