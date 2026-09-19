@@ -152,50 +152,11 @@ def build_flow(call=complete):
         regenerating the student's work.
         """
 
-        previous_verification = ctx.latest("verification")
-
         if ctx.latest("student_goal") is not None:
-            if (
-                previous_verification
-                and previous_verification.get("status") == "REVISION_REQUIRED"
-            ):
-                # Every verification attempt must consume a fresh evidence
-                # submission. If the number of submissions is not greater
-                # than the number of verification attempts, ask the student
-                # for a new revision instead of reusing old evidence.
-                evidence_count = len(ctx.history("evidence_submission"))
-                verification_count = len(ctx.history("verification"))
-
-                if evidence_count <= verification_count:
-                    pending = callback.pending(ctx.store, ctx.run_id)
-                    evidence_pending = any(
-                        q.context.get("kind") == "evidence" for q in pending
-                    )
-                    if not evidence_pending:
-                        missing = previous_verification.get("missing_evidence") or []
-                        missing_text = ", ".join(missing) if missing else "the missing artifacts"
-                        callback.ask(
-                            ctx.store,
-                            ctx.run_id,
-                            (
-                                "Your previous evidence was not enough to verify the work. "
-                                f"Add concrete proof for: {missing_text}. "
-                                "Submit links, file names, screenshots, prototype URLs, "
-                                "notes, or other artifacts showing what you actually completed."
-                            ),
-                            {
-                                "kind": "evidence",
-                                "resume_state": RunState.DRAFTING.value,
-                                "reason": (
-                                    "The verifier requested stronger evidence. "
-                                    "A new submission is required before verification can run again."
-                                ),
-                                "missing_evidence": missing,
-                            },
-                            ctx.settings,
-                        )
-                    return RunState.AWAITING_EXPERT
-
+            # Once the mentor has made the decision, later passes of DRAFTING
+            # are only routing back into verification. Never reopen the mentor
+            # checkpoint just because another task needs evidence.
+            if ctx.latest("mentor_decision") is not None:
                 return RunState.GATING
 
             return RunState.PROBING
@@ -519,54 +480,48 @@ def build_flow(call=complete):
 
     def handle_gating(ctx) -> RunState:
         """
-        Verify real submitted evidence, then create Proof-of-Ability and
-        recommend an opportunity from the local opportunity catalog.
+        Execute student work one assigned task at a time.
+
+        Each task has its own evidence submission and verifier decision.
+        The workflow never verifies the same submission twice. Once every
+        assigned task is verified, each participating student gets their own
+        Proof-of-Ability and next-opportunity recommendation.
         """
+        project = ctx.latest("project_brief") or {}
+        plan = ctx.latest("task_plan") or {}
+        mentor = ctx.latest("mentor_decision") or {}
+        run_input = ctx.latest("input") or {}
+        candidates = run_input.get("candidate_profiles") or []
 
-        project = ctx.latest("project_brief")
-        plan = ctx.latest("task_plan")
-        mentor = ctx.latest("mentor_decision")
-        evidence = ctx.latest("evidence_submission")
+        tasks = plan.get("tasks") or []
+        owners = plan.get("owners") or {}
+        conditions = plan.get("acceptance_conditions") or {}
 
-        # Do not spend a verifier model call when no real evidence exists yet.
-        # The human must submit concrete proof first.
-        if evidence is None:
-            pending = callback.pending(ctx.store, ctx.run_id)
-            evidence_pending = any(
-                q.context.get("kind") == "evidence" for q in pending
-            )
-            if not evidence_pending:
-                callback.ask(
-                    ctx.store,
-                    ctx.run_id,
-                    (
-                        "Submit concrete evidence for the completed project work: "
-                        "links, screenshots, file names, prototype URLs, notes, "
-                        "or other artifacts showing what was actually completed."
-                    ),
-                    {
-                        "kind": "evidence",
-                        "resume_state": RunState.GATING.value,
-                        "reason": (
-                            "Verification cannot responsibly pass without "
-                            "evidence of the work."
+        # Support older runs that predate task-level evidence.
+        if not tasks:
+            evidence = ctx.latest("evidence_submission")
+            if evidence is None:
+                pending = callback.pending(ctx.store, ctx.run_id)
+                if not any(q.context.get("kind") == "evidence" for q in pending):
+                    callback.ask(
+                        ctx.store,
+                        ctx.run_id,
+                        (
+                            "Submit concrete evidence for the completed project work: "
+                            "links, screenshots, file names, prototype URLs, notes, "
+                            "or other artifacts showing what was actually completed."
                         ),
-                    },
-                    ctx.settings,
-                )
-            return RunState.AWAITING_EXPERT
+                        {"kind": "evidence", "resume_state": RunState.GATING.value},
+                        ctx.settings,
+                    )
+                return RunState.AWAITING_EXPERT
 
-        result = call(
-            settings=ctx.settings,
-            budget=ctx.budget,
-            messages=[
-                {
-                    "role": "system",
-                    "content": load_prompt("verify"),
-                },
-                {
-                    "role": "user",
-                    "content": json.dumps(
+            result = call(
+                settings=ctx.settings,
+                budget=ctx.budget,
+                messages=[
+                    {"role": "system", "content": load_prompt("verify")},
+                    {"role": "user", "content": json.dumps(
                         {
                             "project": project,
                             "task_plan": plan,
@@ -574,56 +529,22 @@ def build_flow(call=complete):
                             "evidence_submission": evidence,
                         },
                         indent=2,
-                    ),
-                },
-            ],
-            schema=VerificationResult,
-            step="verify",
-        )
+                    )},
+                ],
+                schema=VerificationResult,
+                step="verify",
+            )
+            ctx.append("verification", result.model_dump(), produced_by="agent:verifier")
+            if result.status == "REVISION_REQUIRED":
+                return RunState.DRAFTING
 
-        ctx.append(
-            "verification",
-            result.model_dump(),
-            produced_by="agent:verifier",
-        )
-
-        if result.status == "REVISION_REQUIRED":
-            attempts = len(ctx.history("verification"))
-
-            if attempts > MAX_REVISIONS:
-                ctx.append(
-                    "failure",
-                    {
-                        "kind": "verification_exhausted",
-                        "detail": (
-                            "The project did not pass verification within "
-                            "the revision limit."
-                        ),
-                    },
-                    produced_by="system",
-                )
-                return RunState.FAILED
-
-            # A failed verification must lead to NEW evidence, not another
-            # verification of the same submission. The counts let us tell
-            # whether the student has already responded to the latest review.
-            return RunState.DRAFTING
-
-        # ---------------------------------------------------------
-        # Agent 7: Proof-of-Ability Generator
-        # ---------------------------------------------------------
-        student_profile = (ctx.latest("input") or {}).get("student_profile") or {}
-        proof = call(
-            settings=ctx.settings,
-            budget=ctx.budget,
-            messages=[
-                {
-                    "role": "system",
-                    "content": load_prompt("proof"),
-                },
-                {
-                    "role": "user",
-                    "content": json.dumps(
+            student_profile = run_input.get("student_profile") or {}
+            proof = call(
+                settings=ctx.settings,
+                budget=ctx.budget,
+                messages=[
+                    {"role": "system", "content": load_prompt("proof")},
+                    {"role": "user", "content": json.dumps(
                         {
                             "student_profile": student_profile,
                             "project": project,
@@ -633,60 +554,299 @@ def build_flow(call=complete):
                             "evidence_submission": evidence,
                         },
                         indent=2,
-                    ),
-                },
-            ],
-            schema=ProofOfAbility,
-            step="proof",
-        )
-
-        ctx.append(
-            "proof_of_ability",
-            proof.model_dump(),
-            produced_by="agent:proof",
-        )
-
-        # ---------------------------------------------------------
-        # Agent 8: Connector
-        # ---------------------------------------------------------
-        candidates = rank_opportunities(proof)
-
-        recommendation = call(
-            settings=ctx.settings,
-            budget=ctx.budget,
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You are the ImpactLoop Connector. Recommend exactly "
-                        "one next opportunity from the candidate catalog below. "
-                        "Do not invent an opportunity, organisation, or "
-                        "requirement. Explain the match using only the verified "
-                        "Proof-of-Ability record."
-                    ),
-                },
-                {
-                    "role": "user",
-                    "content": json.dumps(
+                    )},
+                ],
+                schema=ProofOfAbility,
+                step="proof",
+            )
+            ctx.append("proof_of_ability", proof.model_dump(), produced_by="agent:proof")
+            candidates_for_opportunity = rank_opportunities(proof)
+            recommendation = call(
+                settings=ctx.settings,
+                budget=ctx.budget,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are the ImpactLoop Connector. Recommend exactly "
+                            "one next opportunity from the candidate catalog below. "
+                            "Do not invent an opportunity, organisation, or requirement."
+                        ),
+                    },
+                    {"role": "user", "content": json.dumps(
                         {
                             "proof_of_ability": proof.model_dump(),
-                            "candidate_opportunities": candidates,
+                            "candidate_opportunities": candidates_for_opportunity,
                         },
                         indent=2,
-                    ),
-                },
-            ],
-            schema=OpportunityRecommendation,
-            step="connector",
-        )
+                    )},
+                ],
+                schema=OpportunityRecommendation,
+                step="connector",
+            )
+            ctx.append(
+                "opportunity_recommendation",
+                recommendation.model_dump(),
+                produced_by="agent:connector",
+            )
+            return RunState.COMPLETE
 
-        ctx.append(
-            "opportunity_recommendation",
-            recommendation.model_dump(),
-            produced_by="agent:connector",
-        )
+        def candidates_for_owner(owner: str) -> list[dict]:
+            return [
+                profile for profile in candidates
+                if profile.get("student_name") == owner
+            ]
+
+        def owner_email(owner: str) -> str:
+            matches = candidates_for_owner(owner)
+            return matches[0].get("email", "") if matches else ""
+
+        task_submissions = ctx.history("task_evidence_submission")
+        task_verifications = ctx.history("task_verification")
+
+        def records_for(kind_records, task):
+            return [
+                record.payload
+                for record in kind_records
+                if record.payload.get("task") == task
+            ]
+
+        verified_tasks = {
+            payload.get("task")
+            for record in task_verifications
+            for payload in [record.payload]
+            if payload.get("status") == "PASS"
+        }
+
+        assigned = [
+            task for task in tasks
+            if isinstance(owners, dict) and owners.get(task)
+            and owners.get(task) not in {"Unassigned", "None"}
+        ]
+
+        if not assigned:
+            ctx.append(
+                "failure",
+                {
+                    "kind": "no_assigned_tasks",
+                    "detail": "The project plan contains no tasks with valid student owners.",
+                },
+                produced_by="system",
+            )
+            return RunState.FAILED
+
+        # Work through tasks deterministically. One task -> one evidence item ->
+        # one verifier decision. A revision always requires another submission.
+        for task in assigned:
+            owner = owners[task]
+            submissions = records_for(task_submissions, task)
+            verifications = records_for(task_verifications, task)
+            latest_submission = submissions[-1] if submissions else None
+            latest_verification = verifications[-1] if verifications else None
+
+            if latest_verification and latest_verification.get("status") == "PASS":
+                continue
+
+            if latest_submission is None or len(submissions) <= len(verifications):
+                pending = callback.pending(ctx.store, ctx.run_id)
+                task_pending = next(
+                    (
+                        q for q in pending
+                        if q.context.get("kind") == "task_evidence"
+                        and q.context.get("task") == task
+                    ),
+                    None,
+                )
+                if task_pending is None:
+                    missing = (
+                        (latest_verification or {}).get("missing_evidence") or []
+                    )
+                    missing_text = ", ".join(missing)
+                    revision = bool(latest_verification)
+                    question = (
+                        f"Submit evidence for your task: {task}. "
+                        f"Acceptance condition: {conditions.get(task, 'Show concrete work completed.')}"
+                    )
+                    if revision and missing_text:
+                        question += f" The verifier still needs: {missing_text}."
+
+                    callback.ask(
+                        ctx.store,
+                        ctx.run_id,
+                        question,
+                        {
+                            "kind": "task_evidence",
+                            "task": task,
+                            "owner": owner,
+                            "owner_email": owner_email(owner),
+                            "acceptance_condition": conditions.get(
+                                task,
+                                "Show concrete work completed.",
+                            ),
+                            "missing_evidence": missing,
+                            "resume_state": RunState.GATING.value,
+                            "reason": (
+                                "Student evidence is required for this assigned task."
+                                if not revision
+                                else "The previous evidence did not satisfy verification; submit a stronger revision."
+                            ),
+                        },
+                        ctx.settings,
+                    )
+                return RunState.AWAITING_EXPERT
+
+            evidence = latest_submission
+            result = call(
+                settings=ctx.settings,
+                budget=ctx.budget,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": load_prompt("verify"),
+                    },
+                    {
+                        "role": "user",
+                        "content": json.dumps(
+                            {
+                                "student_profile": next(
+                                    (
+                                        profile for profile in candidates
+                                        if profile.get("student_name") == owner
+                                    ),
+                                    {},
+                                ),
+                                "project": project,
+                                "task": task,
+                                "task_owner": owner,
+                                "acceptance_condition": conditions.get(task, ""),
+                                "project_evidence_requirements": (
+                                    project.get("evidence_requirements") or []
+                                ),
+                                "mentor_decision": mentor,
+                                "evidence_submission": evidence,
+                            },
+                            indent=2,
+                        ),
+                    },
+                ],
+                schema=VerificationResult,
+                step="verify",
+            )
+
+            payload = result.model_dump()
+            payload.update({"task": task, "task_owner": owner})
+            ctx.append("task_verification", payload, produced_by="agent:verifier")
+
+            if result.status == "REVISION_REQUIRED":
+                return RunState.DRAFTING
+
+            return RunState.DRAFTING
+
+        # Every assigned task has passed. Produce one proof and opportunity for
+        # each participating student, using only that student's verified work.
+        proof_history = ctx.history("proof_of_ability")
+        recommendation_history = ctx.history("opportunity_recommendation")
+        existing_proof_owners = {
+            record.payload.get("student_name")
+            for record in proof_history
+        }
+        existing_recommendation_owners = {
+            record.payload.get("student_name")
+            for record in recommendation_history
+        }
+
+        owners_in_order = []
+        for task in assigned:
+            owner = owners[task]
+            if owner not in owners_in_order:
+                owners_in_order.append(owner)
+
+        for owner in owners_in_order:
+            if owner in existing_proof_owners and owner in existing_recommendation_owners:
+                continue
+
+            student_tasks = [task for task in assigned if owners[task] == owner]
+            student_submissions = [
+                record.payload
+                for record in task_submissions
+                if record.payload.get("task") in student_tasks
+            ]
+            student_verifications = [
+                record.payload
+                for record in task_verifications
+                if record.payload.get("task") in student_tasks
+                and record.payload.get("status") == "PASS"
+            ]
+            student_profile = next(
+                (
+                    profile for profile in candidates
+                    if profile.get("student_name") == owner
+                ),
+                {},
+            )
+
+            proof = call(
+                settings=ctx.settings,
+                budget=ctx.budget,
+                messages=[
+                    {"role": "system", "content": load_prompt("proof")},
+                    {"role": "user", "content": json.dumps(
+                        {
+                            "student_profile": student_profile,
+                            "student_name": owner,
+                            "project": project,
+                            "task_plan": plan,
+                            "mentor_decision": mentor,
+                            "verified_tasks": student_verifications,
+                            "evidence_submissions": student_submissions,
+                        },
+                        indent=2,
+                    )},
+                ],
+                schema=ProofOfAbility,
+                step="proof",
+            )
+            ctx.append("proof_of_ability", proof.model_dump(), produced_by="agent:proof")
+
+            opportunities = rank_opportunities(proof)
+            recommendation = call(
+                settings=ctx.settings,
+                budget=ctx.budget,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are the ImpactLoop Connector. Recommend exactly "
+                            "one next opportunity from the candidate catalog below. "
+                            "Do not invent an opportunity, organisation, or requirement. "
+                            "Choose only an opportunity supported by the verified proof."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": json.dumps(
+                            {
+                                "student_name": owner,
+                                "proof_of_ability": proof.model_dump(),
+                                "candidate_opportunities": opportunities,
+                            },
+                            indent=2,
+                        ),
+                    },
+                ],
+                schema=OpportunityRecommendation,
+                step="connector",
+            )
+            recommendation_payload = recommendation.model_dump()
+            recommendation_payload["student_name"] = owner
+            ctx.append(
+                "opportunity_recommendation",
+                recommendation_payload,
+                produced_by="agent:connector",
+            )
 
         return RunState.COMPLETE
+
 
     return SimpleNamespace(
         name="impactloop",
