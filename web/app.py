@@ -1209,7 +1209,7 @@ def run_page(request: Request, problem_id: int):
         hero_status = ("active", "Working")
 
     mentor_box = ""
-    if mentor_question:
+    if mentor_question and user["role"] == "mentor":
         mentor_box = f"""
         <section class="card callout">
           <div>
@@ -1219,6 +1219,14 @@ def run_page(request: Request, problem_id: int):
             <p class="small">{esc(mentor_question.context.get("reason", ""))}</p>
           </div>
           <a class="button purple" href="/mentor">Open mentor queue</a>
+        </section>
+        """
+    elif mentor_question and user["role"] == "student":
+        mentor_box = """
+        <section class="card">
+          <span class="eyebrow">Human checkpoint</span>
+          <h2>Waiting for the mentor.</h2>
+          <p class="muted">The AI has paused before execution. A mentor must choose the project direction before students start submitting task evidence.</p>
         </section>
         """
 
