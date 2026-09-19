@@ -251,11 +251,17 @@ def stage_markup(records: list[Any], state: str) -> str:
     parts = []
     for kind, label in STAGES:
         done = kind in kinds
+        if kind == "verification":
+            done = "verification" in kinds or "task_verification" in kinds
         current = (
             state == "awaiting_expert"
             and (
                 (kind == "mentor_decision" and "mentor_decision" not in kinds)
-                or (kind == "verification" and "verification" not in kinds)
+                or (
+                    kind == "verification"
+                    and "verification" not in kinds
+                    and "task_verification" not in kinds
+                )
             )
         )
         cls = "step done" if done else "step current" if current else "step"
@@ -358,6 +364,145 @@ def render_plan(plan: dict[str, Any] | None) -> str:
     """
 
 
+
+def render_my_tasks(
+    plan: dict[str, Any] | None,
+    records: list[Any],
+    user: dict[str, Any],
+    problem_id: int,
+    evidence_question: Any = None,
+) -> str:
+    if not plan or user.get("role") != "student":
+        return ""
+
+    tasks = plan.get("tasks") or []
+    owners = plan.get("owners") or {}
+    conditions = plan.get("acceptance_conditions") or {}
+
+    def history_for(kind: str, task: str) -> list[dict[str, Any]]:
+        return [
+            record.payload
+            for record in records
+            if record.kind == kind and record.payload.get("task") == task
+        ]
+
+    rows = []
+    for index, task in enumerate(tasks):
+        if not isinstance(owners, dict) or owners.get(task) != user["name"]:
+            continue
+
+        submissions = history_for("task_evidence_submission", task)
+        verifications = history_for("task_verification", task)
+        latest_verification = verifications[-1] if verifications else None
+
+        if latest_verification and latest_verification.get("status") == "PASS":
+            badge = '<span class="badge done">Verified</span>'
+        elif latest_verification and latest_verification.get("status") == "REVISION_REQUIRED":
+            badge = '<span class="badge waiting">Revision needed</span>'
+        elif submissions:
+            badge = '<span class="badge active">Evidence submitted</span>'
+        else:
+            badge = '<span class="badge active">Ready to work</span>'
+
+        pending_here = bool(
+            evidence_question
+            and evidence_question.context.get("kind") == "task_evidence"
+            and evidence_question.context.get("task") == task
+            and (
+                not evidence_question.context.get("owner_email")
+                or evidence_question.context.get("owner_email") == user["email"]
+            )
+        )
+
+        evidence_form = ""
+        if pending_here:
+            evidence_form = f"""
+            <form method="post" action="/run/{problem_id}/evidence">
+              <textarea name="evidence" required placeholder="Add the actual artifact: GitHub link, screenshot, file name, prototype URL, notes, dataset, report, or other proof for this task."></textarea>
+              <button class="button" type="submit">Submit task evidence</button>
+            </form>
+            """
+
+        rows.append(
+            f"""
+            <div class="list-item">
+              <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;">
+                <div>
+                  <span class="eyebrow">Task {index + 1}</span>
+                  <h3>{esc(task)}</h3>
+                </div>
+                {badge}
+              </div>
+              <p class="muted small"><b>Acceptance:</b> {esc(conditions.get(task, "Show concrete work completed."))}</p>
+              {evidence_form}
+            </div>
+            """
+        )
+
+    return f"""
+    <section class="card">
+      <span class="eyebrow">My tasks</span>
+      <h2>Work assigned to {esc(user["name"])}</h2>
+      <div class="list">
+        {"".join(rows) or '<div class="empty">No tasks are assigned to you in this project.</div>'}
+      </div>
+    </section>
+    """
+
+
+def render_proofs(proofs: list[dict[str, Any]]) -> str:
+    if not proofs:
+        return ""
+    cards = []
+    for proof in proofs:
+        evidence = proof.get("evidence") or []
+        verified_tasks = proof.get("verified_tasks") or []
+        cards.append(
+            f"""
+            <div class="proof">
+              <span class="badge done">Verified</span>
+              <h2>{esc(proof.get("student_name", "Student"))}</h2>
+              <h3>{esc(proof.get("capability", "Verified capability"))}</h3>
+              <p>{esc(proof.get("contribution", ""))}</p>
+              <p class="small muted"><b>Verified tasks:</b> {esc(", ".join(verified_tasks))}</p>
+              <div class="pill-row">{"".join(f'<span class="pill">{esc(x)}</span>' for x in evidence)}</div>
+            </div>
+            """
+        )
+    return f"""
+    <section class="card">
+      <span class="eyebrow">Proof of ability</span>
+      <h2>Verified capability records</h2>
+      <div class="list">{"".join(cards)}</div>
+    </section>
+    """
+
+
+def render_opportunities(opportunities: list[dict[str, Any]]) -> str:
+    if not opportunities:
+        return ""
+    cards = []
+    for item in opportunities:
+        cards.append(
+            f"""
+            <div class="recommendation">
+              <span class="badge done">Recommended next step</span>
+              <h2>{esc(item.get("student_name", "Student"))}</h2>
+              <h3>{esc(item.get("opportunity_title", "Opportunity"))}</h3>
+              <p>{esc(item.get("explanation", ""))}</p>
+              <p class="muted small"><b>Matched evidence:</b> {esc(", ".join(item.get("matched_evidence") or []))}</p>
+            </div>
+            """
+        )
+    return f"""
+    <section class="card">
+      <span class="eyebrow">Next opportunities</span>
+      <h2>What the verified work unlocks</h2>
+      <div class="list">{"".join(cards)}</div>
+    </section>
+    """
+
+
 def render_mentor(mentor: dict[str, Any] | None) -> str:
     if not mentor:
         return ""
@@ -436,10 +581,14 @@ def home(request: Request):
         )
 
     s = db()
-    problems = s.db.execute(
-        "SELECT * FROM problems WHERE created_by=? ORDER BY created_at DESC",
-        (user["id"],),
-    ).fetchall()
+    if user["role"] == "mentor":
+        problems = s.db.execute(
+            "SELECT * FROM problems ORDER BY created_at DESC"
+        ).fetchall()
+    else:
+        problems = s.db.execute(
+            "SELECT * FROM problems ORDER BY created_at DESC"
+        ).fetchall()
 
     rows = []
     for p in problems:
@@ -948,7 +1097,13 @@ def run_page(request: Request, problem_id: int):
 
     pending = callback.pending(s, problem["run_id"])
     mentor_question = next((q for q in pending if q.context.get("kind") == "mentor"), None)
-    evidence_question = next((q for q in pending if q.context.get("kind") == "evidence"), None)
+    evidence_question = next(
+        (
+            q for q in pending
+            if q.context.get("kind") in {"task_evidence", "evidence"}
+        ),
+        None,
+    )
 
     # Recover an older demo run that is waiting for a mentor but has no open
     # question visible anymore. This keeps the live project self-contained.
@@ -1065,26 +1220,23 @@ def run_page(request: Request, problem_id: int):
         """
 
     evidence_box = ""
-    if evidence_question and user["role"] == "student":
-        evidence_box = f"""
-        <section class="card">
-          <span class="eyebrow">Student evidence</span>
-          <h2>Show what you actually completed.</h2>
-          <p class="muted">{esc(evidence_question.question)}</p>
-          <form method="post" action="/run/{problem_id}/evidence">
-            <textarea name="evidence" required placeholder="Add links, file names, screenshots, notes, prototype URLs, or other concrete evidence."></textarea>
-            <button class="button" type="submit">Submit evidence</button>
-          </form>
-        </section>
-        """
-    elif evidence_question and user["role"] == "mentor":
+    if evidence_question and user["role"] == "mentor":
         evidence_box = """
         <section class="card">
           <span class="eyebrow">Waiting on student</span>
-          <h2>Student evidence is required before verification.</h2>
-          <p class="muted">The mentor has already made the project decision. A student must now submit concrete evidence of the work.</p>
+          <h2>Student task evidence is required.</h2>
+          <p class="muted">The mentor decision is complete. The assigned student must submit evidence for the task before the verifier can judge it.</p>
         </section>
         """
+    elif evidence_question and user["role"] == "student":
+        evidence_box = render_my_tasks(
+            plan,
+            records,
+            user,
+            problem_id,
+            evidence_question,
+        )
+
 
     return layout(
         f"""
@@ -1102,10 +1254,11 @@ def run_page(request: Request, problem_id: int):
           {render_project(project)}
           {render_team(team)}
           {render_plan(plan)}
+          {render_my_tasks(plan, records, user, problem_id, evidence_question)}
           {render_mentor(mentor_decision)}
           {render_verification(verification)}
-          {render_proof(proof)}
-          {render_opportunity(opportunity)}
+          {render_proofs([record.payload for record in records if record.kind == "proof_of_ability"])}
+          {render_opportunities([record.payload for record in records if record.kind == "opportunity_recommendation"])}
 
           <section class="card">
             <a class="button secondary" href="/">Back to workspace</a>
@@ -1132,34 +1285,56 @@ def submit_evidence(
         (problem_id,),
     ).fetchone()
 
-    if not problem:
-        return RedirectResponse("/", status_code=303)
-
-    if user["role"] != "student":
+    if not problem or user["role"] != "student":
         return RedirectResponse(f"/run/{problem_id}", status_code=303)
 
-    questions = callback.pending(s, problem["run_id"])
+    pending = callback.pending(s, problem["run_id"])
     question = next(
-        (q for q in questions if q.context.get("kind") == "evidence"),
+        (
+            q for q in pending
+            if q.context.get("kind") in {"task_evidence", "evidence"}
+        ),
         None,
     )
 
     if question:
+        owner_email = question.context.get("owner_email")
+        owner_name = question.context.get("owner")
+        if owner_email and owner_email != user["email"]:
+            return RedirectResponse(f"/run/{problem_id}", status_code=303)
+        if owner_name and owner_name != user["name"]:
+            return RedirectResponse(f"/run/{problem_id}", status_code=303)
+
         callback.answer(
             s,
             question.id,
             evidence.strip(),
             who=user["email"],
         )
-        s.append(
-            problem["run_id"],
-            "evidence_submission",
-            {
-                "submitted_by": user["email"],
-                "evidence": evidence.strip(),
-            },
-            produced_by=f"user:{user['email']}",
-        )
+
+        if question.context.get("kind") == "task_evidence":
+            s.append(
+                problem["run_id"],
+                "task_evidence_submission",
+                {
+                    "task": question.context.get("task"),
+                    "task_owner": user["name"],
+                    "submitted_by": user["email"],
+                    "evidence": evidence.strip(),
+                },
+                produced_by=f"user:{user['email']}",
+            )
+        else:
+            s.append(
+                problem["run_id"],
+                "evidence_submission",
+                {
+                    "submitted_by": user["email"],
+                    "evidence": evidence.strip(),
+                },
+                produced_by=f"user:{user['email']}",
+            )
+
         runner.advance(s, problem["run_id"], build_flow(), settings())
 
     return RedirectResponse(f"/run/{problem_id}", status_code=303)
