@@ -708,7 +708,12 @@ def mentor_answer(request: Request, qid: str, answer: str = Form(...)):
                     produced_by=f"system:profile-refresh:{creator_email}",
                 )
 
-    callback.answer(store, qid, answer.strip(), who=user["email"])
+    run_id = callback.answer(store, qid, answer.strip(), who=user["email"])
+
+    # Wake the suspended workflow immediately after the mentor decision.
+    if run_id:
+        runner.advance(store, run_id, build_flow(), settings())
+
     return RedirectResponse("/mentor", status_code=303)
 
 
