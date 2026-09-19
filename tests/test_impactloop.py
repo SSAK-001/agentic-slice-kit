@@ -53,20 +53,22 @@ def test_impactloop_completes_with_real_human_checkpoints(tmp_path):
 
     evidence_question = next(
         q for q in callback.pending(store, run_id)
-        if q.context.get("kind") == "evidence"
+        if q.context.get("kind") == "task_evidence"
     )
     callback.answer(
         store,
         evidence_question.id,
-        "general notes from the project",
+        "interview_notes.md - three student interview notes",
         who="student@test",
     )
     store.append(
         run_id,
-        "evidence_submission",
+        "task_evidence_submission",
         {
+            "task": "Interview students about how they currently find campus events",
+            "task_owner": "Test Student",
             "submitted_by": "student@test",
-            "evidence": "general notes from the project",
+            "evidence": "interview_notes.md - three student interview notes",
         },
         produced_by="student@test",
     )
@@ -76,20 +78,22 @@ def test_impactloop_completes_with_real_human_checkpoints(tmp_path):
 
     revision_question = next(
         q for q in callback.pending(store, run_id)
-        if q.context.get("kind") == "evidence"
+        if q.context.get("kind") == "task_evidence"
     )
     callback.answer(
         store,
         revision_question.id,
-        "interview_notes.md; prototype.png; walkthrough_findings.md",
+        "interview_notes.md; interview_audio_summary.md; participant_notes.md",
         who="student@test",
     )
     store.append(
         run_id,
-        "evidence_submission",
+        "task_evidence_submission",
         {
+            "task": "Interview students about how they currently find campus events",
+            "task_owner": "Test Student",
             "submitted_by": "student@test",
-            "evidence": "interview_notes.md; prototype.png; walkthrough_findings.md",
+            "evidence": "interview_notes.md; interview_audio_summary.md; participant_notes.md",
         },
         produced_by="student@test",
     )
@@ -97,8 +101,9 @@ def test_impactloop_completes_with_real_human_checkpoints(tmp_path):
     state = runner.advance(store, run_id, build_flow(call=stub), settings())
 
     assert state is RunState.COMPLETE
-    assert store.latest(run_id, "verification")["status"] == "PASS"
+    assert store.latest(run_id, "task_verification")["status"] == "PASS"
     assert store.latest(run_id, "proof_of_ability")["verification_status"] == "verified"
+    assert store.latest(run_id, "proof_of_ability")["student_name"] == "Test Student"
     assert store.latest(run_id, "opportunity_recommendation") is not None
 
 
