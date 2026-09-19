@@ -219,7 +219,7 @@ textarea{{min-height:120px;resize:vertical}}
 .problem:last-child{{border-bottom:0}}
 .small{{font-size:12px}}
 @media(max-width:900px){{.stepper{{grid-template-columns:repeat(4,1fr)}}}}
-@media(max-width:760px){{.half,.third{{grid-column:span 12}}.option-grid,.kpi-row{{grid-template-columns:1fr}}nav{{align-items:flex-start;gap:12px}.identity{{display:none}}}}
+@media(max-width:760px){{.half,.third{{grid-column:span 12}}.option-grid,.kpi-row{{grid-template-columns:1fr}}nav{{align-items:flex-start;gap:12px}}.identity{{display:none}}}}
 </style>
 </head>
 <body>
