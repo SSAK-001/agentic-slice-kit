@@ -272,7 +272,7 @@ decisions, because every interesting failure is in the middle steps.
 | | |
 |---|---|
 | `slice/llm.py:90` · `_Span` | One span per call |
-| `slice/config.py:44` · `Settings.tracing_enabled` | Off unless configured |
+| `slice/config.py:51` · `Settings.tracing_enabled` | Off unless configured |
 
 **Tracing no-ops when Langfuse is not set up**, and that is deliberate: no team
 should be blocked at hour zero by an observability signup. Add it at hour four.
