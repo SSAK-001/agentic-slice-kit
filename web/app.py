@@ -856,6 +856,34 @@ def run_page(request: Request, problem_id: int):
     mentor_question = next((q for q in pending if q.context.get("kind") == "mentor"), None)
     evidence_question = next((q for q in pending if q.context.get("kind") == "evidence"), None)
 
+    # Recover an older demo run that is waiting for a mentor but has no open
+    # question visible anymore. This keeps the live project self-contained.
+    mentor_decision = latest_payload(records, "mentor_decision")
+    if state == "awaiting_expert" and mentor_question is None and mentor_decision is None:
+        callback.ask(
+            s,
+            problem["run_id"],
+            (
+                "Which priority should guide the project if a unified "
+                "discovery flow conflicts with existing club-channel preferences?"
+            ),
+            {
+                "kind": "mentor",
+                "resume_state": "probing",
+                "options": [
+                    "Prioritise one unified student experience",
+                    "Keep every existing channel unchanged",
+                ],
+                "reason": (
+                    "The project is paused at the human checkpoint. "
+                    "Choose the direction the AI should use before verification."
+                ),
+            },
+            settings(),
+        )
+        pending = callback.pending(s, problem["run_id"])
+        mentor_question = next((q for q in pending if q.context.get("kind") == "mentor"), None)
+
     project = latest_payload(records, "project_brief")
     team = latest_payload(records, "team_proposal")
     plan = latest_payload(records, "task_plan")
