@@ -40,7 +40,9 @@ class StudentMatch(BaseModel):
     student_name: str
     role: str
     reason: str
-    matched_capabilities: list[str]
+    matched_capabilities: list[str] = Field(default_factory=list)
+    assigned_tasks: list[str] = Field(default_factory=list)
+    match_strength: int = Field(default=0, ge=0, le=100)
 
 
 class TeamProposal(BaseModel):
