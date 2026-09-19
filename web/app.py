@@ -370,7 +370,7 @@ def render_my_tasks(
     records: list[Any],
     user: dict[str, Any],
     problem_id: int,
-    evidence_question: Any = None,
+    task_questions: list[Any] | None = None,
 ) -> str:
     if not plan or user.get("role") != "student":
         return ""
@@ -404,18 +404,17 @@ def render_my_tasks(
         else:
             badge = '<span class="badge active">Ready to work</span>'
 
-        pending_here = bool(
-            evidence_question
-            and evidence_question.context.get("kind") == "task_evidence"
-            and evidence_question.context.get("task") == task
-            and (
-                not evidence_question.context.get("owner_email")
-                or evidence_question.context.get("owner_email") == user["email"]
-            )
+        task_questions = task_questions or []
+        task_question = next(
+            (
+                question for question in task_questions
+                if question.context.get("task") == task
+            ),
+            None,
         )
 
         evidence_form = ""
-        if pending_here:
+        if task_question:
             evidence_form = f"""
             <form method="post" action="/run/{problem_id}/evidence">
               <textarea name="evidence" required placeholder="Add the actual artifact: GitHub link, screenshot, file name, prototype URL, notes, dataset, report, or other proof for this task."></textarea>
@@ -1273,7 +1272,20 @@ def run_page(request: Request, problem_id: int):
           {render_project(project)}
           {render_team(team)}
           {render_plan(plan)}
-          {render_my_tasks(plan, records, user, problem_id, evidence_question)}
+          {render_my_tasks(
+              plan,
+              records,
+              user,
+              problem_id,
+              [
+                  q for q in pending
+                  if q.context.get("kind") == "task_evidence"
+                  and (
+                      not q.context.get("owner_email")
+                      or q.context.get("owner_email") == user["email"]
+                  )
+              ],
+          )}
           {render_mentor(mentor_decision)}
           {render_verification(verification)}
           {render_proofs([record.payload for record in records if record.kind == "proof_of_ability"])}
