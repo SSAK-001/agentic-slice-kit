@@ -159,28 +159,38 @@ def build_flow(call=complete):
                 previous_verification
                 and previous_verification.get("status") == "REVISION_REQUIRED"
             ):
-                if ctx.latest("evidence_submission") is None:
+                # Every verification attempt must consume a fresh evidence
+                # submission. If the number of submissions is not greater
+                # than the number of verification attempts, ask the student
+                # for a new revision instead of reusing old evidence.
+                evidence_count = len(ctx.history("evidence_submission"))
+                verification_count = len(ctx.history("verification"))
+
+                if evidence_count <= verification_count:
                     pending = callback.pending(ctx.store, ctx.run_id)
                     evidence_pending = any(
                         q.context.get("kind") == "evidence" for q in pending
                     )
                     if not evidence_pending:
+                        missing = previous_verification.get("missing_evidence") or []
+                        missing_text = ", ".join(missing) if missing else "the missing artifacts"
                         callback.ask(
                             ctx.store,
                             ctx.run_id,
                             (
-                                "Verification found missing evidence. Submit the "
-                                "links, file names, screenshots, or notes that "
-                                "prove what you actually completed."
+                                "Your previous evidence was not enough to verify the work. "
+                                f"Add concrete proof for: {missing_text}. "
+                                "Submit links, file names, screenshots, prototype URLs, "
+                                "notes, or other artifacts showing what you actually completed."
                             ),
                             {
                                 "kind": "evidence",
                                 "resume_state": RunState.DRAFTING.value,
                                 "reason": (
-                                    "The verifier rejected the first evidence "
-                                    "submission and needs concrete proof before "
-                                    "the capability can be verified."
+                                    "The verifier requested stronger evidence. "
+                                    "A new submission is required before verification can run again."
                                 ),
+                                "missing_evidence": missing,
                             },
                             ctx.settings,
                         )
@@ -594,6 +604,9 @@ def build_flow(call=complete):
                 )
                 return RunState.FAILED
 
+            # A failed verification must lead to NEW evidence, not another
+            # verification of the same submission. The counts let us tell
+            # whether the student has already responded to the latest review.
             return RunState.DRAFTING
 
         # ---------------------------------------------------------
