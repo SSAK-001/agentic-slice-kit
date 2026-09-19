@@ -1096,6 +1096,20 @@ def run_page(request: Request, problem_id: int):
             state = s.get_state(problem["run_id"]).value
 
     pending = callback.pending(s, problem["run_id"])
+
+    # A run may already be suspended on one task-evidence question from an
+    # earlier version of the app. Re-enter GATING once so the current task
+    # scheduler can create the remaining independent student questions.
+    if (
+        state == "awaiting_expert"
+        and any(q.context.get("kind") == "task_evidence" for q in pending)
+    ):
+        s.set_state(problem["run_id"], RunState.GATING)
+        runner.advance(s, problem["run_id"], build_flow(), settings())
+        records = s.replay(problem["run_id"])
+        state = s.get_state(problem["run_id"]).value
+        pending = callback.pending(s, problem["run_id"])
+
     mentor_question = next((q for q in pending if q.context.get("kind") == "mentor"), None)
     evidence_question = next(
         (
