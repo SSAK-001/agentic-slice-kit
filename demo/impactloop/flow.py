@@ -64,37 +64,50 @@ def rank_opportunities(proof: ProofOfAbility, limit: int = 3) -> list[dict]:
 
 
 def fallback_team_and_plan(project: dict, candidates: list[dict]) -> tuple[dict, dict]:
-    """Deterministic recovery when a legacy live-run refresh call fails."""
+    """Deterministic profile-to-task matching used only for safe live-run recovery."""
     tasks = project.get("tasks") or []
-    assignments = {}
+    assignments: dict[str, dict] = {}
+
+    def score(profile: dict, task: str) -> int:
+        task_text = task.lower()
+        skills = " ".join(profile.get("skills") or []).lower()
+        interests = " ".join(profile.get("interests") or []).lower()
+        role = (profile.get("preferred_role") or "").lower()
+        bio = (profile.get("bio") or "").lower()
+        text = " ".join([skills, interests, role, bio])
+
+        score_value = 0
+        frontend = ["react", "frontend", "html", "css", "javascript", "ui", "web", "layout", "interface"]
+        research = ["research", "data", "python", "analysis", "source", "organize", "identify", "report"]
+
+        if any(word in task_text for word in ["research", "identify", "sources", "data", "analysis"]):
+            score_value += sum(word in text for word in research) * 4
+            score_value += 4 if any(word in role for word in ["research", "data"]) else 0
+
+        if any(word in task_text for word in ["html", "css", "react", "frontend", "layout", "responsive", "interface", "web application"]):
+            score_value += sum(word in text for word in frontend) * 4
+            score_value += 4 if any(word in role for word in ["frontend", "developer", "ui", "web"]) else 0
+
+        if "mock data" in task_text or "data set" in task_text:
+            score_value += sum(word in text for word in ["python", "data", "analysis", "research"]) * 4
+            score_value += 4 if any(word in role for word in ["research", "data"]) else 0
+
+        for skill in profile.get("skills") or []:
+            skill_words = [token for token in skill.lower().split() if len(token) > 2]
+            score_value += sum(token in task_text for token in skill_words) * 2
+
+        return score_value
 
     for task in tasks:
-        task_text = task.lower()
-        ranked = []
-        for profile in candidates:
-            text = " ".join(
-                [
-                    " ".join(profile.get("skills") or []),
-                    " ".join(profile.get("interests") or []),
-                    profile.get("preferred_role") or "",
-                    profile.get("bio") or "",
-                ]
-            ).lower()
-            score = 0
-            if any(x in task_text for x in ["react", "frontend", "html", "css", "web", "ui", "layout", "interface"]):
-                score += sum(x in text for x in ["react", "frontend", "html", "css", "web", "ui", "design"])
-            if any(x in task_text for x in ["research", "source", "data", "identify"]):
-                score += sum(x in text for x in ["research", "data", "python", "analysis"])
-            for skill in profile.get("skills") or []:
-                if any(token in task_text for token in skill.lower().split() if len(token) > 2):
-                    score += 1
-            ranked.append((score, profile))
-
-        ranked.sort(key=lambda item: item[0], reverse=True)
+        ranked = sorted(
+            ((score(profile, task), profile) for profile in candidates),
+            key=lambda item: item[0],
+            reverse=True,
+        )
         if ranked and ranked[0][0] > 0:
             assignments[task] = ranked[0][1]
 
-    members = {}
+    members: dict[str, dict] = {}
     for task, profile in assignments.items():
         name = profile.get("student_name", "Student")
         member = members.setdefault(
@@ -105,10 +118,11 @@ def fallback_team_and_plan(project: dict, candidates: list[dict]) -> tuple[dict,
                 "reason": "Matched from the student's saved skills, interests, preferred role, and bio.",
                 "matched_capabilities": list(profile.get("skills") or []),
                 "assigned_tasks": [],
-                "match_strength": 80,
+                "match_strength": 85,
             },
         )
-        member["assigned_tasks"].append(task)
+        if task not in member["assigned_tasks"]:
+            member["assigned_tasks"].append(task)
 
     team = {
         "members": list(members.values()),
