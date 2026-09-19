@@ -389,6 +389,7 @@ def build_flow(call=complete):
         # ---------------------------------------------------------
         # Agent 7: Proof-of-Ability Generator
         # ---------------------------------------------------------
+        student_profile = (ctx.latest("input") or {}).get("student_profile") or {}
         proof = call(
             settings=ctx.settings,
             budget=ctx.budget,
@@ -401,6 +402,7 @@ def build_flow(call=complete):
                     "role": "user",
                     "content": json.dumps(
                         {
+                            "student_profile": student_profile,
                             "project": project,
                             "task_plan": plan,
                             "mentor_decision": mentor,
