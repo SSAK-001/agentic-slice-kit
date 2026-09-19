@@ -179,7 +179,60 @@ def new_problem(request: Request, title: str = Form(...), description: str = For
     problem_id = cur.lastrowid
     run_id = s.create_run("impactloop", {"problem_id": problem_id, "title": title.strip(), "created_by": user["email"]})
     s.db.execute("UPDATE problems SET run_id=? WHERE id=?", (run_id, problem_id))
-    s.append(run_id, "input", {"title": title.strip(), "text": description.strip()}, produced_by=f"user:{user['email']}")
+    profile_row = s.db.execute(
+        "SELECT * FROM student_profiles WHERE user_id=?",
+        (user["id"],),
+    ).fetchone()
+
+    def profile_dict(row):
+        if not row:
+            return {}
+        return {
+            "student_name": user["name"],
+            "skills": json.loads(row["skills"]),
+            "interests": json.loads(row["interests"]),
+            "availability": row["availability"],
+            "preferred_role": row["preferred_role"],
+            "bio": row["bio"],
+            "evidence_links": json.loads(row["evidence_links"]),
+        }
+
+    candidates = []
+    rows = s.db.execute(
+        """SELECT u.name, u.email, p.skills, p.interests, p.availability,
+                  p.preferred_role, p.bio, p.evidence_links
+           FROM users u
+           JOIN student_profiles p ON p.user_id=u.id
+           WHERE u.role='student' AND u.id != ?
+           ORDER BY p.created_at DESC
+           LIMIT 20""",
+        (user["id"],),
+    ).fetchall()
+
+    for row in rows:
+        candidates.append({
+            "student_name": row["name"],
+            "email": row["email"],
+            "skills": json.loads(row["skills"]),
+            "interests": json.loads(row["interests"]),
+            "availability": row["availability"],
+            "preferred_role": row["preferred_role"],
+            "bio": row["bio"],
+            "evidence_links": json.loads(row["evidence_links"]),
+        })
+
+    s.append(
+        run_id,
+        "input",
+        {
+            "title": title.strip(),
+            "text": description.strip(),
+            "student_profile": profile_dict(profile_row),
+            "candidate_profiles": candidates,
+        },
+        produced_by=f"user:{user['email']}",
+    )
+
     # Live models are used here. The existing Budget enforces SLICE_MAX_TOKENS_PER_RUN.
     runner.advance(s, run_id, build_flow(), settings())
     return RedirectResponse(f"/run/{problem_id}", status_code=303)
@@ -188,14 +241,111 @@ def new_problem(request: Request, title: str = Form(...), description: str = For
 @app.get("/run/{problem_id}", response_class=HTMLResponse)
 def run_page(request: Request, problem_id: int):
     user = require_user(request)
-    if isinstance(user, RedirectResponse): return user
+    if isinstance(user, RedirectResponse):
+        return user
+
     s = db()
-    problem = s.db.execute("SELECT * FROM problems WHERE id=?", (problem_id,)).fetchone()
-    if not problem: return RedirectResponse("/", status_code=303)
+    problem = s.db.execute(
+        "SELECT * FROM problems WHERE id=?",
+        (problem_id,),
+    ).fetchone()
+    if not problem:
+        return RedirectResponse("/", status_code=303)
+
     records = s.replay(problem["run_id"])
-    labels = " → ".join(r.kind.replace("_", " ").title() for r in records if r.kind not in {"input"})
+    labels = " → ".join(
+        r.kind.replace("_", " ").title()
+        for r in records
+        if r.kind not in {"input"}
+    )
     final = records[-1].payload if records else {}
-    return layout(f'<section class="card"><p class="badge">LIVE PROJECT</p><h1>{esc(problem["title"])}</h1><p class="muted">{esc(problem["description"])}</p><div class="steps">{esc(labels)}</div><p><span class="badge">{esc(s.get_state(problem["run_id"]).value)}</span></p><h2>Latest agent output</h2><pre>{esc(final)}</pre><a class="button" href="/">Back to workspace</a></section>', user)
+    pending = callback.pending(s, problem["run_id"])
+
+    evidence_question = next(
+        (q for q in pending if q.context.get("kind") == "evidence"),
+        None,
+    )
+
+    evidence_box = ""
+    if evidence_question:
+        evidence_box = f"""
+        <section class="card">
+          <p class="badge">EVIDENCE REQUIRED</p>
+          <h2>Show what you actually completed</h2>
+          <p class="muted">{esc(evidence_question.question)}</p>
+          <form method="post" action="/run/{problem_id}/evidence">
+            <textarea name="evidence" required
+              placeholder="Add file names, links, screenshots, notes, prototype URLs, or other concrete evidence."></textarea>
+            <button>Submit evidence</button>
+          </form>
+        </section>
+        """
+
+    return layout(f"""
+    <div class="grid">
+      <section class="card">
+        <p class="badge">LIVE PROJECT</p>
+        <h1>{esc(problem["title"])}</h1>
+        <p class="muted">{esc(problem["description"])}</p>
+        <div class="steps">{esc(labels)}</div>
+        <p><span class="badge">{esc(s.get_state(problem["run_id"]).value)}</span></p>
+      </section>
+      {evidence_box}
+      <section class="card">
+        <h2>Latest agent output</h2>
+        <pre>{esc(final)}</pre>
+      </section>
+      <section class="card">
+        <a class="button" href="/">Back to workspace</a>
+      </section>
+    </div>
+    """, user)
+
+
+@app.post("/run/{problem_id}/evidence")
+def submit_evidence(
+    request: Request,
+    problem_id: int,
+    evidence: str = Form(...),
+):
+    user = require_user(request)
+    if isinstance(user, RedirectResponse):
+        return user
+
+    s = db()
+    problem = s.db.execute(
+        "SELECT * FROM problems WHERE id=?",
+        (problem_id,),
+    ).fetchone()
+
+    if not problem:
+        return RedirectResponse("/", status_code=303)
+
+    questions = callback.pending(s, problem["run_id"])
+    question = next(
+        (q for q in questions if q.context.get("kind") == "evidence"),
+        None,
+    )
+
+    if question:
+        callback.answer(
+            s,
+            question.id,
+            evidence.strip(),
+            who=user["email"],
+        )
+        s.append(
+            problem["run_id"],
+            "evidence_submission",
+            {
+                "submitted_by": user["email"],
+                "evidence": evidence.strip(),
+            },
+            produced_by=f"user:{user['email']}",
+        )
+        runner.advance(s, problem["run_id"], build_flow(), settings())
+
+    return RedirectResponse(f"/run/{problem_id}", status_code=303)
 
 
 @app.get("/logout")
