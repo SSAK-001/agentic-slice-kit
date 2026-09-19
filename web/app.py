@@ -14,6 +14,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 
 from demo.impactloop.flow import build_flow
 from slice import callback, runner
+from slice.records import RunState
 from slice.config import settings
 from slice.store import Store
 
@@ -869,6 +870,68 @@ def run_page(request: Request, problem_id: int):
 
     records = s.replay(problem["run_id"])
     state = s.get_state(problem["run_id"]).value
+
+    # Recover the existing project if the legacy mentor transition failed.
+    if state == "failed" and latest_payload(records, "mentor_decision") is not None:
+        if latest_payload(records, "verification") is None:
+            run_input = s.latest(problem["run_id"], "input") or {}
+            candidates = run_input.get("candidate_profiles") or []
+            creator = s.db.execute(
+                """SELECT u.name, u.email, p.skills, p.interests, p.availability,
+                          p.preferred_role, p.bio, p.evidence_links
+                   FROM users u
+                   LEFT JOIN student_profiles p ON p.user_id=u.id
+                   WHERE u.id=?""",
+                (problem["created_by"],),
+            ).fetchone()
+            if creator and not any(
+                item.get("email") == creator["email"]
+                for item in candidates
+                if isinstance(item, dict)
+            ):
+                candidates.insert(
+                    0,
+                    {
+                        "student_name": creator["name"],
+                        "email": creator["email"],
+                        "skills": json.loads(creator["skills"] or "[]"),
+                        "interests": json.loads(creator["interests"] or "[]"),
+                        "availability": creator["availability"] or "",
+                        "preferred_role": creator["preferred_role"] or "",
+                        "bio": creator["bio"] or "",
+                        "evidence_links": json.loads(creator["evidence_links"] or "[]"),
+                    },
+                )
+                run_input["candidate_profiles"] = candidates
+                s.append(
+                    problem["run_id"],
+                    "input",
+                    run_input,
+                    produced_by=f"system:legacy-recovery:{creator['email']}",
+                )
+
+            from demo.impactloop.flow import fallback_team_and_plan
+            project_payload = latest_payload(records, "project_brief")
+            if project_payload:
+                recovered_team, recovered_plan = fallback_team_and_plan(
+                    project_payload, candidates
+                )
+                s.append(
+                    problem["run_id"],
+                    "team_proposal",
+                    recovered_team,
+                    produced_by="system:legacy-recovery",
+                )
+                s.append(
+                    problem["run_id"],
+                    "task_plan",
+                    recovered_plan,
+                    produced_by="system:legacy-recovery",
+                )
+            s.set_state(problem["run_id"], RunState.GATING)
+            runner.advance(s, problem["run_id"], build_flow(), settings())
+            records = s.replay(problem["run_id"])
+            state = s.get_state(problem["run_id"]).value
 
     # Repair a stale project if a mentor answer was saved but the state machine
     # did not get a chance to resume.
