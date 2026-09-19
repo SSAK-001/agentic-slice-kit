@@ -10,6 +10,8 @@ Rules:
 - Every deliverable must produce something that can later be inspected.
 - State what capability the work is intended to demonstrate.
 - Identify evidence that would be required to verify the student's contribution.
+- Required capabilities must be concrete skills or capability areas that can be compared against student profiles.
+- Keep the number of tasks small enough to be completed in the stated time.
 
 The output must contain:
 - project_title
