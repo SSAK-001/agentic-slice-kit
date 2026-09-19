@@ -606,7 +606,7 @@ def mentor(request: Request):
             else "active"
         )
 
-        pending_for_project = [q for q in qs if q.run_id == p["run_id"]]
+        pending_for_project = [\n            q for q in qs\n            if q.run_id == p["run_id"] and q.context.get("kind") == "mentor"\n        ]
         decision_html = ""
         for q in pending_for_project:
             options = q.context.get("options") or []
@@ -978,16 +978,74 @@ def run_page(request: Request, problem_id: int):
     project = latest_payload(records, "project_brief")
     team = latest_payload(records, "team_proposal")
     plan = latest_payload(records, "task_plan")
+
+    # Repair older runs whose team/plan collapsed all work onto one student.
+    mentor_decision = latest_payload(records, "mentor_decision")
+    if project and mentor_decision:
+        profile_rows = s.db.execute(
+            """SELECT u.name, u.email, p.skills, p.interests, p.availability,
+                      p.preferred_role, p.bio, p.evidence_links
+               FROM users u
+               JOIN student_profiles p ON p.user_id=u.id
+               WHERE u.role='student'
+               ORDER BY p.created_at"""
+        ).fetchall()
+        live_candidates = [
+            {
+                "student_name": row["name"],
+                "email": row["email"],
+                "skills": json.loads(row["skills"]),
+                "interests": json.loads(row["interests"]),
+                "availability": row["availability"],
+                "preferred_role": row["preferred_role"],
+                "bio": row["bio"],
+                "evidence_links": json.loads(row["evidence_links"]),
+            }
+            for row in profile_rows
+        ]
+
+        member_names = {
+            member.get("student_name")
+            for member in (team or {}).get("members", [])
+            if isinstance(member, dict)
+        }
+        if len(member_names) < min(2, len(live_candidates)):
+            from demo.impactloop.flow import fallback_team_and_plan
+            repaired_team, repaired_plan = fallback_team_and_plan(
+                project, live_candidates
+            )
+            if repaired_team.get("members"):
+                s.append(
+                    problem["run_id"],
+                    "team_proposal",
+                    repaired_team,
+                    produced_by="system:profile-rebalance",
+                )
+                s.append(
+                    problem["run_id"],
+                    "task_plan",
+                    repaired_plan,
+                    produced_by="system:profile-rebalance",
+                )
+                records = s.replay(problem["run_id"])
+                team = latest_payload(records, "team_proposal")
+                plan = latest_payload(records, "task_plan")
+
     mentor_decision = latest_payload(records, "mentor_decision")
     verification = latest_payload(records, "verification")
     proof = latest_payload(records, "proof_of_ability")
     opportunity = latest_payload(records, "opportunity_recommendation")
 
-    hero_status = {
-        "awaiting_expert": ("waiting", "Waiting for a mentor"),
-        "complete": ("done", "Project complete"),
-        "failed": ("fail", "Needs attention"),
-    }.get(state, ("active", "Working"))
+    if state == "awaiting_expert" and evidence_question:
+        hero_status = ("waiting", "Waiting for student evidence")
+    elif state == "awaiting_expert" and mentor_question:
+        hero_status = ("waiting", "Waiting for a mentor")
+    elif state == "complete":
+        hero_status = ("done", "Project complete")
+    elif state == "failed":
+        hero_status = ("fail", "Needs attention")
+    else:
+        hero_status = ("active", "Working")
 
     mentor_box = ""
     if mentor_question:
@@ -1004,16 +1062,24 @@ def run_page(request: Request, problem_id: int):
         """
 
     evidence_box = ""
-    if evidence_question:
+    if evidence_question and user["role"] == "student":
         evidence_box = f"""
         <section class="card">
-          <span class="eyebrow">Evidence required</span>
+          <span class="eyebrow">Student evidence</span>
           <h2>Show what you actually completed.</h2>
           <p class="muted">{esc(evidence_question.question)}</p>
           <form method="post" action="/run/{problem_id}/evidence">
             <textarea name="evidence" required placeholder="Add links, file names, screenshots, notes, prototype URLs, or other concrete evidence."></textarea>
             <button class="button" type="submit">Submit evidence</button>
           </form>
+        </section>
+        """
+    elif evidence_question and user["role"] == "mentor":
+        evidence_box = """
+        <section class="card">
+          <span class="eyebrow">Waiting on student</span>
+          <h2>Student evidence is required before verification.</h2>
+          <p class="muted">The mentor has already made the project decision. A student must now submit concrete evidence of the work.</p>
         </section>
         """
 
@@ -1065,6 +1131,9 @@ def submit_evidence(
 
     if not problem:
         return RedirectResponse("/", status_code=303)
+
+    if user["role"] != "student":
+        return RedirectResponse(f"/run/{problem_id}", status_code=303)
 
     questions = callback.pending(s, problem["run_id"])
     question = next(
