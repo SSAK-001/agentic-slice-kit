@@ -673,25 +673,31 @@ def mentor_answer(request: Request, qid: str, answer: str = Form(...)):
     if problem_row:
         run_id = problem_row["run_id"]
         run_input = store.latest(run_id, "input") or {}
-        profile_row = store.db.execute(
-            "SELECT * FROM student_profiles WHERE user_id=?",
-            (user["id"],),
+        creator_row = store.db.execute(
+            "SELECT u.name, u.email, p.skills, p.interests, p.availability, "
+            "p.preferred_role, p.bio, p.evidence_links "
+            "FROM users u JOIN student_profiles p ON p.user_id=u.id "
+            "WHERE u.id=?",
+            (problem_row["created_by"],),
         ).fetchone()
-        if profile_row:
+
+        if creator_row:
             candidates = run_input.get("candidate_profiles") or []
             emails = {item.get("email") for item in candidates}
-            if user["email"] not in emails:
+            creator_email = creator_row["email"]
+
+            if creator_email not in emails:
                 candidates.insert(
                     0,
                     {
-                        "student_name": user["name"],
-                        "email": user["email"],
-                        "skills": json.loads(profile_row["skills"]),
-                        "interests": json.loads(profile_row["interests"]),
-                        "availability": profile_row["availability"],
-                        "preferred_role": profile_row["preferred_role"],
-                        "bio": profile_row["bio"],
-                        "evidence_links": json.loads(profile_row["evidence_links"]),
+                        "student_name": creator_row["name"],
+                        "email": creator_email,
+                        "skills": json.loads(creator_row["skills"]),
+                        "interests": json.loads(creator_row["interests"]),
+                        "availability": creator_row["availability"],
+                        "preferred_role": creator_row["preferred_role"],
+                        "bio": creator_row["bio"],
+                        "evidence_links": json.loads(creator_row["evidence_links"]),
                     },
                 )
                 run_input["candidate_profiles"] = candidates
@@ -699,7 +705,7 @@ def mentor_answer(request: Request, qid: str, answer: str = Form(...)):
                     run_id,
                     "input",
                     run_input,
-                    produced_by=f"system:profile-refresh:{user['email']}",
+                    produced_by=f"system:profile-refresh:{creator_email}",
                 )
 
     callback.answer(store, qid, answer.strip(), who=user["email"])
