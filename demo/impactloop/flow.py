@@ -104,7 +104,7 @@ def build_flow(call=complete):
                     "role": "user",
                     "content": (
                         "Verify this project:\n\n"
-                        + json.dumps(project.payload, indent=2)
+                        + json.dumps(project, indent=2)
                     ),
                 },
             ],
@@ -152,7 +152,7 @@ def build_flow(call=complete):
                     "role": "user",
                     "content": json.dumps(
                         {
-                            "project": project.payload,
+                            "project": project,
                             "verification": result.model_dump(),
                         },
                         indent=2,
