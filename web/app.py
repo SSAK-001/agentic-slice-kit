@@ -325,12 +325,20 @@ def render_plan(plan: dict[str, Any] | None) -> str:
     if not plan:
         return ""
     tasks = plan.get("tasks") or []
-    owners = plan.get("owners") or []
-    conditions = plan.get("acceptance_conditions") or []
+    owners = plan.get("owners") or {}
+    conditions = plan.get("acceptance_conditions") or {}
     rows = []
     for i, task in enumerate(tasks):
-        owner = owners[i] if i < len(owners) else "Unassigned"
-        condition = conditions[i] if i < len(conditions) else ""
+        if isinstance(owners, dict):
+            owner = owners.get(task, "Unassigned")
+        else:
+            owner = owners[i] if i < len(owners) else "Unassigned"
+
+        if isinstance(conditions, dict):
+            condition = conditions.get(task, "")
+        else:
+            condition = conditions[i] if i < len(conditions) else ""
+
         rows.append(
             f"""
             <div class="task">
