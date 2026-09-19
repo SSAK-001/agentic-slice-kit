@@ -30,9 +30,11 @@ class VerificationResult(BaseModel):
 
 
 class ProofOfAbility(BaseModel):
+    student_name: str = "Student"
     capability: str
     contribution: str
     evidence: list[str]
+    verified_tasks: list[str] = Field(default_factory=list)
     verification_status: Literal["verified"]
 
 
@@ -65,6 +67,7 @@ class MentorDecision(BaseModel):
 
 
 class OpportunityRecommendation(BaseModel):
+    student_name: str = "Student"
     opportunity_title: str
     explanation: str
     matched_evidence: list[str]
