@@ -417,6 +417,7 @@ def render_my_tasks(
         if task_question:
             evidence_form = f"""
             <form method="post" action="/run/{problem_id}/evidence">
+              <input type="hidden" name="task" value="{esc(task)}">
               <textarea name="evidence" required placeholder="Add the actual artifact: GitHub link, screenshot, file name, prototype URL, notes, dataset, report, or other proof for this task."></textarea>
               <button class="button" type="submit">Submit task evidence</button>
             </form>
@@ -1305,6 +1306,7 @@ def submit_evidence(
     request: Request,
     problem_id: int,
     evidence: str = Form(...),
+    task: str = Form(""),
 ):
     user = require_user(request)
     if isinstance(user, RedirectResponse):
@@ -1320,13 +1322,31 @@ def submit_evidence(
         return RedirectResponse(f"/run/{problem_id}", status_code=303)
 
     pending = callback.pending(s, problem["run_id"])
+
+    task_questions = [
+        q for q in pending
+        if q.context.get("kind") == "task_evidence"
+        and (
+            not q.context.get("owner_email")
+            or q.context.get("owner_email") == user["email"]
+        )
+        and (
+            not q.context.get("owner")
+            or q.context.get("owner") == user["name"]
+        )
+    ]
+
     question = next(
-        (
-            q for q in pending
-            if q.context.get("kind") in {"task_evidence", "evidence"}
-        ),
+        (q for q in task_questions if q.context.get("task") == task),
         None,
     )
+    if question is None and task_questions and not task:
+        question = task_questions[0]
+    if question is None:
+        question = next(
+            (q for q in pending if q.context.get("kind") == "evidence"),
+            None,
+        )
 
     if question:
         owner_email = question.context.get("owner_email")
