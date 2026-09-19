@@ -733,7 +733,23 @@ def new_problem(request: Request, title: str = Form(...), description: str = For
             "evidence_links": json.loads(row["evidence_links"]),
         }
 
+    # The project creator is also a real team member, so include their
+    # saved profile in the semantic matching pool.
     candidates = []
+    if profile_row:
+        candidates.append(
+            {
+                "student_name": user["name"],
+                "email": user["email"],
+                "skills": json.loads(profile_row["skills"]),
+                "interests": json.loads(profile_row["interests"]),
+                "availability": profile_row["availability"],
+                "preferred_role": profile_row["preferred_role"],
+                "bio": profile_row["bio"],
+                "evidence_links": json.loads(profile_row["evidence_links"]),
+            }
+        )
+
     rows = s.db.execute(
         """SELECT u.name, u.email, p.skills, p.interests, p.availability,
                   p.preferred_role, p.bio, p.evidence_links
