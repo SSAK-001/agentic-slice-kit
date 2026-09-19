@@ -1190,7 +1190,10 @@ def run_page(request: Request, problem_id: int):
                 plan = latest_payload(records, "task_plan")
 
     mentor_decision = latest_payload(records, "mentor_decision")
-    verification = latest_payload(records, "verification")
+    verification = (
+        latest_payload(records, "verification")
+        or latest_payload(records, "task_verification")
+    )
     proof = latest_payload(records, "proof_of_ability")
     opportunity = latest_payload(records, "opportunity_recommendation")
 
@@ -1229,13 +1232,7 @@ def run_page(request: Request, problem_id: int):
         </section>
         """
     elif evidence_question and user["role"] == "student":
-        evidence_box = render_my_tasks(
-            plan,
-            records,
-            user,
-            problem_id,
-            evidence_question,
-        )
+        evidence_box = ""
 
 
     return layout(
