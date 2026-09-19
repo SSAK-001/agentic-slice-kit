@@ -12,9 +12,16 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-def load_env(path: str | Path = ".env") -> bool:
+def load_env(path: str | Path | None = None) -> bool:
     """Read .env into the environment. Real environment variables win, so a
-    Codespaces secret or an exported value can override the file."""
+    Codespaces secret or an exported value can override the file.
+
+    Resolve the default .env from the project root instead of the current
+    working directory. This keeps the key loading reliable when the app is
+    started from a different directory.
+    """
+    if path is None:
+        path = Path(__file__).resolve().parent.parent / ".env"
     try:
         for line in Path(path).read_text().splitlines():
             line = line.strip()
