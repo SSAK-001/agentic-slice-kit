@@ -4,23 +4,24 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+from slice import callback
 from slice.llm import complete
 from slice.records import RunState
 
 from .schema import (
     StudentGoal,
     ProjectBrief,
-    StudentMatch,
     TeamProposal,
     TaskPlan,
-    MentorDecision,
     VerificationResult,
     ProofOfAbility,
     OpportunityRecommendation,
 )
 
+
 PROMPTS = Path(__file__).parent / "prompts"
 
+# This is a domain revision limit, not an API-credit limit.
 MAX_REVISIONS = 1
 
 
@@ -31,7 +32,14 @@ def load_prompt(name: str) -> str:
 def build_flow(call=complete):
 
     def handle_drafting(ctx) -> RunState:
-        # Step 1: Intake agent
+        """
+        Build the student goal, project brief, team proposal,
+        and task plan.
+        """
+
+        # ---------------------------------------------------------
+        # Agent 1: Intake
+        # ---------------------------------------------------------
         if ctx.latest("student_goal") is None:
             student = call(
                 settings=ctx.settings,
@@ -44,7 +52,7 @@ def build_flow(call=complete):
                     {
                         "role": "user",
                         "content": (
-                            "Create the StudentGoal record for the "
+                            "Create the StudentGoal record for this "
                             "Student Event Discovery challenge."
                         ),
                     },
@@ -59,7 +67,9 @@ def build_flow(call=complete):
                 produced_by="agent:intake",
             )
 
-            # Step 2: Problem Decomposer agent
+            # ---------------------------------------------------------
+            # Agent 2: Problem Decomposer
+            # ---------------------------------------------------------
             project = call(
                 settings=ctx.settings,
                 budget=ctx.budget,
@@ -71,7 +81,8 @@ def build_flow(call=complete):
                     {
                         "role": "user",
                         "content": (
-                            "Create a project brief for this challenge:\n\n"
+                            "Create a project brief for this "
+                            "Student Event Discovery challenge:\n\n"
                             + student.model_dump_json(indent=2)
                         ),
                     },
@@ -86,7 +97,9 @@ def build_flow(call=complete):
                 produced_by="agent:decomposer",
             )
 
-            # Step 3: Semantic Team Matcher agent
+            # ---------------------------------------------------------
+            # Agent 3: Semantic Team Matcher
+            # ---------------------------------------------------------
             team = call(
                 settings=ctx.settings,
                 budget=ctx.budget,
@@ -95,7 +108,7 @@ def build_flow(call=complete):
                         "role": "system",
                         "content": (
                             "Match students to complementary roles. "
-                            "Explain why each person fits."
+                            "Explain why each student fits the project."
                         ),
                     },
                     {
@@ -116,7 +129,9 @@ def build_flow(call=complete):
                 produced_by="agent:team_matcher",
             )
 
-            # Step 4: Orchestrator agent
+            # ---------------------------------------------------------
+            # Agent 4: Orchestrator
+            # ---------------------------------------------------------
             plan = call(
                 settings=ctx.settings,
                 budget=ctx.budget,
@@ -151,49 +166,80 @@ def build_flow(call=complete):
 
             return RunState.PROBING
 
-        # After evidence revision, return to the mentor/planning stage.
+        # After weak evidence, return to the probing stage.
         return RunState.PROBING
 
     def handle_probing(ctx) -> RunState:
-        # Step 5: Mentor/Blocker Handler agent
-        if ctx.latest("mentor_decision") is None:
-            decision = call(
-                settings=ctx.settings,
-                budget=ctx.budget,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "Identify the important project priority "
-                            "and record the mentor decision."
-                        ),
-                    },
-                    {
-                        "role": "user",
-                        "content": json.dumps(
-                            {
-                                "project": ctx.latest("project_brief"),
-                                "team": ctx.latest("team_proposal"),
-                                "plan": ctx.latest("task_plan"),
-                            },
-                            indent=2,
-                        ),
-                    },
-                ],
-                schema=MentorDecision,
-                step="mentor",
+        """
+        Human-in-the-loop stage.
+
+        The first time this stage runs, it creates a real persisted
+        mentor question and suspends the workflow.
+
+        After the mentor answers, the callback system wakes the run.
+        The answer is then converted into a structured mentor_decision
+        record that later agents can read.
+        """
+
+        # If a structured mentor decision already exists, do not create
+        # another one after an evidence revision.
+        if ctx.latest("mentor_decision") is not None:
+            return RunState.GATING
+
+        # Check whether a human has already answered the persisted question.
+        answers = ctx.history("expert_answer")
+
+        if not answers:
+            callback.ask(
+                ctx.store,
+                ctx.run_id,
+                (
+                    "Which priority should guide the project if a unified "
+                    "discovery flow conflicts with existing club-channel "
+                    "preferences?"
+                ),
+                {
+                    "resume_state": RunState.PROBING.value,
+                    "options": [
+                        "Prioritise one unified student experience",
+                        "Keep every existing channel unchanged",
+                    ],
+                    "reason": (
+                        "The system detected a possible conflict between "
+                        "a unified discovery experience and existing club channels."
+                    ),
+                },
+                ctx.settings,
             )
 
-            ctx.append(
-                "mentor_decision",
-                decision.model_dump(),
-                produced_by="agent:mentor_handler",
-            )
+            # The runner will stop here with AWAITING_EXPERT.
+            return RunState.AWAITING_EXPERT
+
+        # Convert the human's persisted answer into a typed project record.
+        answer = answers[-1].payload
+
+        ctx.append(
+            "mentor_decision",
+            {
+                "question": answer["question"],
+                "decision": answer.get("answer") or "No mentor response",
+                "priority": answer.get("answer") or "Unresolved",
+                "answered_by": answer.get("who") or "unresolved_no_expert",
+            },
+            produced_by="human:mentor",
+        )
 
         return RunState.GATING
 
     def handle_gating(ctx) -> RunState:
-        # Step 6: Verifier agent
+        """
+        Verify evidence, request revision if necessary,
+        then create Proof-of-Ability and recommend an opportunity.
+        """
+
+        # ---------------------------------------------------------
+        # Agent 6: Verifier
+        # ---------------------------------------------------------
         project = ctx.latest("project_brief")
         plan = ctx.latest("task_plan")
         mentor = ctx.latest("mentor_decision")
@@ -245,9 +291,12 @@ def build_flow(call=complete):
                 )
                 return RunState.FAILED
 
+            # Go backward for evidence revision.
             return RunState.DRAFTING
 
-        # Step 7: Proof-of-Ability agent
+        # ---------------------------------------------------------
+        # Agent 7: Proof-of-Ability Generator
+        # ---------------------------------------------------------
         proof = call(
             settings=ctx.settings,
             budget=ctx.budget,
@@ -261,6 +310,8 @@ def build_flow(call=complete):
                     "content": json.dumps(
                         {
                             "project": project,
+                            "task_plan": plan,
+                            "mentor_decision": mentor,
                             "verification": result.model_dump(),
                         },
                         indent=2,
@@ -277,7 +328,9 @@ def build_flow(call=complete):
             produced_by="agent:proof",
         )
 
-        # Step 8: Connector agent
+        # ---------------------------------------------------------
+        # Agent 8: Connector
+        # ---------------------------------------------------------
         recommendation = call(
             settings=ctx.settings,
             budget=ctx.budget,
@@ -286,7 +339,7 @@ def build_flow(call=complete):
                     "role": "system",
                     "content": (
                         "Recommend a suitable next opportunity based "
-                        "only on the verified proof."
+                        "only on the verified Proof-of-Ability record."
                     ),
                 },
                 {
