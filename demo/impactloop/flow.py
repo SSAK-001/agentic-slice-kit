@@ -62,6 +62,71 @@ def rank_opportunities(proof: ProofOfAbility, limit: int = 3) -> list[dict]:
     return [item for _, item in scored[:limit]]
 
 
+
+def fallback_team_and_plan(project: dict, candidates: list[dict]) -> tuple[dict, dict]:
+    """Deterministic recovery when a legacy live-run refresh call fails."""
+    tasks = project.get("tasks") or []
+    assignments = {}
+
+    for task in tasks:
+        task_text = task.lower()
+        ranked = []
+        for profile in candidates:
+            text = " ".join(
+                [
+                    " ".join(profile.get("skills") or []),
+                    " ".join(profile.get("interests") or []),
+                    profile.get("preferred_role") or "",
+                    profile.get("bio") or "",
+                ]
+            ).lower()
+            score = 0
+            if any(x in task_text for x in ["react", "frontend", "html", "css", "web", "ui", "layout", "interface"]):
+                score += sum(x in text for x in ["react", "frontend", "html", "css", "web", "ui", "design"])
+            if any(x in task_text for x in ["research", "source", "data", "identify"]):
+                score += sum(x in text for x in ["research", "data", "python", "analysis"])
+            for skill in profile.get("skills") or []:
+                if any(token in task_text for token in skill.lower().split() if len(token) > 2):
+                    score += 1
+            ranked.append((score, profile))
+
+        ranked.sort(key=lambda item: item[0], reverse=True)
+        if ranked and ranked[0][0] > 0:
+            assignments[task] = ranked[0][1]
+
+    members = {}
+    for task, profile in assignments.items():
+        name = profile.get("student_name", "Student")
+        member = members.setdefault(
+            name,
+            {
+                "student_name": name,
+                "role": profile.get("preferred_role") or "Contributor",
+                "reason": "Matched from the student's saved skills, interests, preferred role, and bio.",
+                "matched_capabilities": list(profile.get("skills") or []),
+                "assigned_tasks": [],
+                "match_strength": 80,
+            },
+        )
+        member["assigned_tasks"].append(task)
+
+    team = {
+        "members": list(members.values()),
+        "unresolved_gaps": [task for task in tasks if task not in assignments],
+    }
+    plan = {
+        "tasks": tasks,
+        "owners": {
+            task: assignments[task].get("student_name", "Unassigned")
+            if task in assignments else "Unassigned"
+            for task in tasks
+        },
+        "acceptance_conditions": {task: f"Complete: {task}" for task in tasks},
+        "evidence_requirements": project.get("evidence_requirements") or [],
+    }
+    return team, plan
+
+
 def build_flow(call=complete):
 
     def handle_drafting(ctx) -> RunState:
@@ -338,79 +403,82 @@ def build_flow(call=complete):
 
         if creator_name and creator_name not in member_names:
             project = ctx.latest("project_brief")
-            refreshed_team = call(
-                settings=ctx.settings,
-                budget=ctx.budget,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "Act as a semantic capability matcher. Compare the "
-                            "project requirements and concrete tasks against every "
-                            "supplied student profile. Include suitable students "
-                            "who can genuinely contribute, including the project "
-                            "creator when their profile fits. Assign concrete tasks "
-                            "only when supported by the profile. Never invent skills "
-                            "or experience. Return the strongest valid team coverage, "
-                            "with reasons, matched capabilities, assigned tasks, and "
-                            "0-100 match strength."
-                        ),
-                    },
-                    {
-                        "role": "user",
-                        "content": json.dumps(
-                            {
-                                "project": project,
-                                "candidate_profiles": candidates,
-                            },
-                            indent=2,
-                        ),
-                    },
-                ],
-                schema=TeamProposal,
-                step="team_refresh",
-            )
-
-            ctx.append(
-                "team_proposal",
-                refreshed_team.model_dump(),
-                produced_by="agent:team_matcher_refresh",
-            )
-
-            refreshed_plan = call(
-                settings=ctx.settings,
-                budget=ctx.budget,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "Create a project plan with task owners, acceptance "
-                            "conditions, and evidence requirements. Use only the "
-                            "proposed team and project tasks. Give each task the "
-                            "best suitable owner when the team provides a valid "
-                            "match; otherwise leave it unassigned."
-                        ),
-                    },
-                    {
-                        "role": "user",
-                        "content": json.dumps(
-                            {
-                                "project": project,
-                                "team": refreshed_team.model_dump(),
-                            },
-                            indent=2,
-                        ),
-                    },
-                ],
-                schema=TaskPlan,
-                step="plan_refresh",
-            )
-
-            ctx.append(
-                "task_plan",
-                refreshed_plan.model_dump(),
-                produced_by="agent:orchestrator_refresh",
-            )
+            try:
+                refreshed_team = call(
+                    settings=ctx.settings,
+                    budget=ctx.budget,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": (
+                                "Act as a semantic capability matcher. Compare the "
+                                "project requirements and concrete tasks against every "
+                                "supplied student profile. Include suitable students "
+                                "who can genuinely contribute, including the project "
+                                "creator when their profile fits. Assign concrete tasks "
+                                "only when supported by the profile. Never invent skills "
+                                "or experience."
+                            ),
+                        },
+                        {
+                            "role": "user",
+                            "content": json.dumps(
+                                {"project": project, "candidate_profiles": candidates},
+                                indent=2,
+                            ),
+                        },
+                    ],
+                    schema=TeamProposal,
+                    step="team_refresh",
+                )
+                refreshed_plan = call(
+                    settings=ctx.settings,
+                    budget=ctx.budget,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": (
+                                "Create a project plan with task owners, acceptance "
+                                "conditions, and evidence requirements using only "
+                                "the project tasks and proposed team."
+                            ),
+                        },
+                        {
+                            "role": "user",
+                            "content": json.dumps(
+                                {
+                                    "project": project,
+                                    "team": refreshed_team.model_dump(),
+                                },
+                                indent=2,
+                            ),
+                        },
+                    ],
+                    schema=TaskPlan,
+                    step="plan_refresh",
+                )
+                ctx.append(
+                    "team_proposal",
+                    refreshed_team.model_dump(),
+                    produced_by="agent:team_matcher_refresh",
+                )
+                ctx.append(
+                    "task_plan",
+                    refreshed_plan.model_dump(),
+                    produced_by="agent:orchestrator_refresh",
+                )
+            except Exception:
+                fallback_team, fallback_plan = fallback_team_and_plan(project, candidates)
+                ctx.append(
+                    "team_proposal",
+                    fallback_team,
+                    produced_by="system:team_refresh_fallback",
+                )
+                ctx.append(
+                    "task_plan",
+                    fallback_plan,
+                    produced_by="system:plan_refresh_fallback",
+                )
 
         ctx.append(
             "mentor_decision",
